@@ -37,6 +37,7 @@ import cgi
 import Cookie
 import email.utils
 import errno
+import json
 import logging
 import magic
 import os
@@ -45,27 +46,28 @@ import select
 import signal
 import socket
 import sys
-import threading
+import urlparse
 import time
 import traceback
 #import weakref
-
-try:
-    from cStringIO import StringIO
-except ImportError:
-    from StringIO import StringIO
-
-import json
 
 from base64 import b64encode, b64decode
 from BaseHTTPServer import BaseHTTPRequestHandler
 from crypt import crypt
 from hashlib import sha1
-from Queue import Queue
-from SocketServer import TCPServer
 from urllib2 import Request
+from sonicprobe import helpers
 from sonicprobe.libs import threading_tcp_server, urisup
-from rfc6266 import parse_headers, build_header
+
+try:
+    from rfc6266_parser import build_header, parse_headers
+except ImportError:
+    from rfc6266 import build_header, parse_headers
+
+try:
+    from cStringIO import StringIO
+except ImportError:
+    from StringIO import StringIO
 
 
 BUFFER_SIZE     = 65536
@@ -134,7 +136,10 @@ class Command(object):
 
 
 class HttpResponse(Request):
-    def __init__(self, code=200, data="", headers={}, message=None, send_body=True):
+    def __init__(self, code=200, data="", headers=None, message=None, send_body=True):
+        if headers is None:
+            headers = {}
+
         Request.__init__(self, "", data=data, headers=headers)
         self.code      = code
         self.send_body = send_body
@@ -171,7 +176,10 @@ class HttpResponse(Request):
 
 
 class HttpResponseJson(HttpResponse):
-    def __init__(self, code=200, data="", headers={}, message=None, send_body=True):
+    def __init__(self, code=200, data="", headers=None, message=None, send_body=True):
+        if headers is None:
+            headers = {}
+
         data = json.dumps(data)
 
         if not isinstance(headers, dict):
@@ -189,12 +197,15 @@ class HttpReqError(Exception):
     in a consistent way.
     """
 
-    def __init__(self, code, text=None, exc=None, json=False, headers={}):
-        self.code       = code
-        self.text       = text
-        self.exc        = exc
-        self.json       = json
-        msg             = text or BaseHTTPRequestHandler.responses[code][1]
+    def __init__(self, code, text=None, exc=None, to_json=False, headers=None):
+        if headers is None:
+            headers = {}
+
+        self.code    = code
+        self.text    = text
+        self.exc     = exc
+        self.to_json = to_json
+        msg          = text or BaseHTTPRequestHandler.responses[code][1]
 
         if not isinstance(headers, dict):
             headers = {}
@@ -207,7 +218,7 @@ class HttpReqError(Exception):
         if self.exc:
             req_handler.send_exception(self.code, self.exc, self.headers)
         elif self.text:
-            if self.json:
+            if self.to_json:
                 req_handler.send_error_json(self.code, self.text, self.headers)
             else:
                 req_handler.send_error_msgtxt(self.code, self.text, self.headers)
@@ -217,7 +228,7 @@ class HttpReqError(Exception):
 
 class HttpReqErrJson(HttpReqError):
     def __init__(self, code, text=None, exc=None):
-        HttpReqError.__init__(self, code, text, exc, json = True)
+        HttpReqError.__init__(self, code, text, exc, to_json = True)
 
 
 class HttpAuthentication(object):
@@ -423,8 +434,11 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         if clen:
             self.wfile.write(data)
 
-    def send_error_explain(self, code, message=None, headers={}):
+    def send_error_explain(self, code, message=None, headers=None):
         "do not use directly"
+        if headers is None:
+            headers = {}
+
         if code in self.responses:
             if message is None:
                 message = self.responses[code][0]
@@ -450,14 +464,20 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                                             'explain':  explain}
         self.end_response(HttpResponse(code, data, headers))
 
-    def send_error_msgtxt(self, code, text, headers={}):
+    def send_error_msgtxt(self, code, text, headers=None):
         "text will be in a <pre> bloc"
+        if headers is None:
+            headers = {}
+
         self.send_error_explain(code,
                                 ''.join(("<pre>\n", cgi.escape(text), "</pre>\n")),
                                 headers)
 
-    def send_exception(self, code, exc_info=None, headers={}):
+    def send_exception(self, code, exc_info=None, headers=None):
         "send an error response including a backtrace to the client"
+        if headers is None:
+            headers = {}
+
         if not exc_info:
             exc_info = sys.exc_info()
 
@@ -465,8 +485,11 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                                ''.join(traceback.format_exception(*exc_info)),
                                headers)
 
-    def send_error_json(self, code, text, headers={}):
+    def send_error_json(self, code, text, headers=None):
         "send an error to the client. text message is formatted in a json stream"
+        if headers is None:
+            headers = {}
+
         self.end_response(HttpResponseJson(code,
                                            {'code':      code,
                                             'message':   text},
@@ -584,7 +607,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             if not ret.has_key(key):
                 ret[key] = {}
 
-            matched     = re.findall('\[([^\]]*)\]', x[0][lbracket:])
+            matched     = re.findall(r'\[([^\]]*)\]', x[0][lbracket:])
             nb          = len(matched)
 
             if nb == 0:
@@ -677,10 +700,10 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             return Cookie.SimpleCookie(self.headers['cookie'])
 
     def parse_payload(self, data, charset):
-        return cgi.parse_qsl(data)
+        return urlparse.parse_qsl(data)
 
     def response_dumps(self, data):
-        if isinstance(data, basestring):
+        if helpers.is_scalar(data):
             return data
 
         return repr(data)
@@ -1059,7 +1082,7 @@ def run(options, http_req_handler = HttpReqHandler):
         except (socket.error, select.error), why:
             if errno.EINTR == why[0]:
                 LOG.debug("interrupted system call")
-            elif errno.EBADF == why[0] and _killed:
+            elif errno.EBADF == why[0] and _KILLED:
                 LOG.debug("server close")
             else:
                 raise

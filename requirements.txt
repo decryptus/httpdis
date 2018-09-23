@@ -1,1 +1,5 @@
-sonicprobe>=0.2.49
+LEPL
+python-magic
+sonicprobe>=0.2.50
+rfc6266
+rfc6266-parser
