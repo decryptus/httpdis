@@ -703,8 +703,11 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         return urlparse.parse_qsl(data)
 
     def response_dumps(self, data):
+        if isinstance(data, bool):
+            data = int(data)
+
         if helpers.is_scalar(data):
-            return data
+            return "%s" % data
 
         return repr(data)
 
