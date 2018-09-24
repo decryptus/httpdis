@@ -706,7 +706,14 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         if isinstance(data, bool):
             data = int(data)
 
+        if data is None:
+            return ""
+
         if helpers.is_scalar(data):
+            return "%s" % data
+
+        if hasattr(data, '__str__') \
+           and type(data).__str__ is not object.__str__:
             return "%s" % data
 
         return repr(data)
