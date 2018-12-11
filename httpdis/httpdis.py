@@ -197,19 +197,18 @@ class HttpReqError(Exception):
     in a consistent way.
     """
 
-    def __init__(self, code, text=None, exc=None, to_json=False, headers=None):
+    def __init__(self, code, text=None, exc=None, headers=None):
         if headers is None:
             headers = {}
 
-        self.code    = code
-        self.text    = text
-        self.exc     = exc
-        self.to_json = to_json
-        msg          = text or BaseHTTPRequestHandler.responses[code][1]
+        self.code = code
+        self.text = text
+        self.exc  = exc
+        msg       = text or BaseHTTPRequestHandler.responses[code][1]
 
         if not isinstance(headers, dict):
             headers = {}
-        self.headers    = headers
+        self.headers = headers
 
         Exception.__init__(self, msg)
 
@@ -217,18 +216,17 @@ class HttpReqError(Exception):
         "Send a response corresponding to this error to the client"
         if self.exc:
             req_handler.send_exception(self.code, self.exc, self.headers)
-        elif self.text:
-            if self.to_json:
-                req_handler.send_error_json(self.code, self.text, self.headers)
-            else:
-                req_handler.send_error_msgtxt(self.code, self.text, self.headers)
-        else:
-            req_handler.send_error_msgtxt(self.code, 'Unknown error', self.headers)
+            return
+
+        text = (self.text
+                or BaseHTTPRequestHandler.responses[self.code][1]
+                or "Unknown error")
+        req_handler.send_error_msg(self.code, text, self.headers)
 
 
 class HttpReqErrJson(HttpReqError):
-    def __init__(self, code, text=None, exc=None):
-        HttpReqError.__init__(self, code, text, exc, to_json = True)
+    def __init__(self, code, text=None, exc=None, headers=None):
+        HttpReqError.__init__(self, code, text, exc, headers)
 
 
 class HttpAuthentication(object):
@@ -297,6 +295,8 @@ class HttpReqHandler(BaseHTTPRequestHandler):
     _DEFAULT_CONTENT_TYPE   = 'text/plain'
     _ALLOWED_CONTENT_TYPES  = ()
     _ALLOWED_MULTIPART_FORM = True
+    _CLASS_REQ_ERROR        = HttpReqError
+    _FUNC_SEND_ERROR        = 'send_error_msgtxt'
 
     _SERVER                 = {}
 
@@ -309,6 +309,12 @@ class HttpReqHandler(BaseHTTPRequestHandler):
     _query_params           = {}
     _fragment               = None
 
+
+    def req_error(self, code, text=None, exc=None, headers=None):
+        return self._CLASS_REQ_ERROR(code, text, exc, headers)
+
+    def send_error_msg(self, code, text, headers=None):
+        return getattr(self, self._FUNC_SEND_ERROR)(code, text, headers)
 
     def log_enabled(self):
         return self._to_log
@@ -469,6 +475,11 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         if headers is None:
             headers = {}
 
+        if isinstance(text, (list, tuple)):
+            text = ''.join(text)
+        elif isinstance(text, dict):
+            text = repr(text)
+
         self.send_error_explain(code,
                                 ''.join(("<pre>\n", cgi.escape(text), "</pre>\n")),
                                 headers)
@@ -481,9 +492,9 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         if not exc_info:
             exc_info = sys.exc_info()
 
-        self.send_error_msgtxt(code,
-                               ''.join(traceback.format_exception(*exc_info)),
-                               headers)
+        self.send_error_msg(code,
+                            traceback.format_exception(*exc_info),
+                            headers)
 
     def send_error_json(self, code, text, headers=None):
         "send an error to the client. text message is formatted in a json stream"
@@ -509,11 +520,11 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         filename    = os.path.abspath(os.path.join(root, filename.strip('/\\')))
 
         if not filename.startswith(root):
-            raise HttpReqError(403, "Access denied.")
+            raise self.req_error(403, "Access denied.")
         if not os.path.exists(filename) or not os.path.isfile(filename):
-            raise HttpReqError(404, "File does not exist.")
+            raise self.req_error(404, "File does not exist.")
         if not os.access(filename, os.R_OK):
-            raise HttpReqError(403, "You do not have permission to access this file.")
+            raise self.req_error(403, "You do not have permission to access this file.")
 
         if self._cmd.content_type:
             mimetype    = self._cmd.content_type
@@ -666,7 +677,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             return self._path
         except urisup.InvalidURIError, e:
             LOG.error("invalid URI: %s", e)
-            raise HttpReqError(400, str(e))
+            raise self.req_error(400, str(e))
 
     def authenticate(self):
         if not _AUTH:
@@ -743,7 +754,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
         try:
             if not self._cmd:
-                raise HttpReqError(404)
+                raise self.req_error(404)
 
             if not self._cmd.to_log:
                 self._to_log = False
@@ -793,17 +804,17 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
         try:
             if not self._cmd:
-                raise HttpReqError(404)
+                raise self.req_error(404)
 
             tenc     = self.headers.get('Transfer-Encoding')
             if tenc and tenc.lower() != 'identity':
-                raise HttpReqError(501, "Not supported; Transfer-Encoding: %s" % tenc)
+                raise self.req_error(501, "Not supported; Transfer-Encoding: %s" % tenc)
 
             ctype    = self.headers.get('Content-Type')
             if ctype:
                 if ctype.lower().startswith('multipart/form-data'):
                     if not self._ALLOWED_MULTIPART_FORM:
-                        raise HttpReqError(501, "Not supported; Content-Type: %s", ctype)
+                        raise self.req_error(501, "Not supported; Content-Type: %s", ctype)
                     multipart = True
                 elif self._ALLOWED_CONTENT_TYPES:
                     ct_found = False
@@ -812,17 +823,17 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                             ct_found = True
                             break
                     if not ct_found:
-                        raise HttpReqError(501, "Not supported; Content-Type: %s" % ctype)
+                        raise self.req_error(501, "Not supported; Content-Type: %s" % ctype)
 
             try:
                 clen = long(self.headers.get('Content-Length') or 0)
             except (ValueError, TypeError):
-                raise HttpReqError(411)
+                raise self.req_error(411)
 
             if clen < 0:
-                raise HttpReqError(411)
+                raise self.req_error(411)
             elif clen > long(_OPTIONS['max_body_size']):
-                raise HttpReqError(413)
+                raise self.req_error(413)
 
             if self._cmd.to_auth:
                 res = self.authenticate()
@@ -839,14 +850,14 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                                                                 fp      = self._payload,
                                                                 headers = self.headers)
                     except Exception, e:
-                        raise HttpReqError(415, text=str(e))
+                        raise self.req_error(415, text=str(e))
                 else:
                     charset = self._cmd.charset or DEFAULT_CHARSET
 
                     try:
                         self._payload_params = self.parse_payload(payload, charset)
                     except ValueError, e:
-                        raise HttpReqError(415, text=str(e))
+                        raise self.req_error(415, text=str(e))
 
             res = self._cmd.handler(self)
 

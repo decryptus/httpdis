@@ -55,6 +55,8 @@ def _encode_if(value, encoding=DEFAULT_CHARSET):
 class HttpReqHandler(httpdis.HttpReqHandler):
     _DEFAULT_CONTENT_TYPE   = CONTENT_TYPE
     _EXCEPTED_CONTENT_TYPES = (CONTENT_TYPE,)
+    _CLASS_REQ_ERROR        = HttpReqErrJson
+    _FUNC_SEND_ERROR        = 'send_error_json'
 
     def parse_payload(self, data, charset):
         return _encode_if(json.loads(data), charset)

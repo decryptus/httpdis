@@ -1,5 +1,5 @@
 LEPL
 python-magic
-sonicprobe>=0.2.58
+sonicprobe>=0.2.68
 rfc6266
 rfc6266-parser
