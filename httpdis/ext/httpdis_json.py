@@ -33,9 +33,12 @@ from httpdis.httpdis import (init,
                              stop)
 
 
-LOG             = logging.getLogger('httpdis.ext.json') # pylint: disable-msg=C0103
-CONTENT_TYPE    = 'application/json'
-DEFAULT_CHARSET = 'utf-8'
+LOG                 = logging.getLogger('httpdis.ext.json') # pylint: disable-msg=C0103
+CONTENT_TYPE        = 'application/json'
+DEFAULT_CHARSET     = 'utf-8'
+
+HTTP_RESPONSE_CLASS = HttpResponseJson
+HTTP_REQERROR_CLASS = HttpReqErrJson
 
 
 def _encode_if(value, encoding=DEFAULT_CHARSET):
@@ -43,26 +46,29 @@ def _encode_if(value, encoding=DEFAULT_CHARSET):
     # cjson.decode would have returned
     if isinstance(value, unicode):
         return value.encode(encoding)
-    elif isinstance(value, list):
+    if isinstance(value, list):
         return [_encode_if(v, encoding) for v in value]
-    elif isinstance(value, dict):
+    if isinstance(value, dict):
         return dict((_encode_if(k, encoding), _encode_if(v, encoding)) for
                     (k, v) in value.iteritems())
-    else:
-        return value
+    return value
 
 
 class HttpReqHandler(httpdis.HttpReqHandler):
-    _DEFAULT_CONTENT_TYPE   = CONTENT_TYPE
-    _EXCEPTED_CONTENT_TYPES = (CONTENT_TYPE,)
-    _CLASS_REQ_ERROR        = HttpReqErrJson
-    _FUNC_SEND_ERROR        = 'send_error_json'
+    _DEFAULT_CONTENT_TYPE  = CONTENT_TYPE
+    _ALLOWED_CONTENT_TYPES = (CONTENT_TYPE,)
+    _FUNC_SEND_ERROR       = 'send_error_json'
 
     def parse_payload(self, data, charset):
         return _encode_if(json.loads(data), charset)
 
     def response_dumps(self, data):
         return json.dumps(data)
+
+    def _mk_error_explain_data(self, code, message, explain):
+        return self.response_dumps({'code':    code,
+                                    'message': message,
+                                    'explain': explain})
 
 
 def run(options, http_req_handler = HttpReqHandler):

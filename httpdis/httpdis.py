@@ -131,8 +131,14 @@ class Command(object):
         self.replacement    = replacement
         self.charset        = charset
         self.content_type   = content_type
-        self.to_auth        = to_auth
         self.to_log         = to_log
+
+        if isinstance(to_auth, (list, tuple)):
+            self.auth_users = list(filter(to_auth, helpers.has_len))
+            self.to_auth    = True
+        else:
+            self.auth_users = []
+            self.to_auth    = bool(to_auth)
 
 
 class HttpResponse(Request):
@@ -184,7 +190,9 @@ class HttpResponseJson(HttpResponse):
 
         if not isinstance(headers, dict):
             headers = {}
-        headers['Content-type'] = 'application/json'
+
+        if headers.get('Content-type', '').split(';', 1)[0].strip() != 'application/json':
+            headers['Content-type'] = 'application/json'
 
         HttpResponse.__init__(self, code, data, headers, message, send_body)
 
@@ -227,6 +235,10 @@ class HttpReqError(Exception):
 class HttpReqErrJson(HttpReqError):
     def __init__(self, code, text=None, exc=None, headers=None):
         HttpReqError.__init__(self, code, text, exc, headers)
+
+
+HTTP_RESPONSE_CLASS = HttpResponse
+HTTP_REQERROR_CLASS = HttpReqError
 
 
 class HttpAuthentication(object):
@@ -277,14 +289,19 @@ class HttpAuthentication(object):
 
         return secret == crypt(passwd, secret[:2])
 
-    def unauthorized(self):
-        res = HttpResponse(401, message='Unauthorized')
-        res.add_header('WWW-Authenticate', 'Basic realm="%s"' % self.realm or '')
+    def unauthorized(self, req_error = None):
+        if not req_error:
+            req_error = HTTP_REQERROR_CLASS
 
-        return res
+        headers = {'WWW-Authenticate': 'Basic realm="%s"' % self.realm or ''}
 
-    def forbidden(self):
-        return HttpResponse(403, message='Forbidden')
+        return req_error(code = 401, headers = headers)
+
+    def forbidden(self, req_error = None):
+        if not req_error:
+            req_error = HTTP_REQERROR_CLASS
+
+        return req_error(code = 403)
 
 
 class HttpReqHandler(BaseHTTPRequestHandler):
@@ -295,7 +312,8 @@ class HttpReqHandler(BaseHTTPRequestHandler):
     _DEFAULT_CONTENT_TYPE   = 'text/plain'
     _ALLOWED_CONTENT_TYPES  = ()
     _ALLOWED_MULTIPART_FORM = True
-    _CLASS_REQ_ERROR        = HttpReqError
+    _CLASS_HTTP_RESP        = HTTP_RESPONSE_CLASS
+    _CLASS_REQ_ERROR        = HTTP_REQERROR_CLASS
     _FUNC_SEND_ERROR        = 'send_error_msgtxt'
 
     _SERVER                 = {}
@@ -310,11 +328,14 @@ class HttpReqHandler(BaseHTTPRequestHandler):
     _fragment               = None
 
 
+    def build_response(self, code=200, data="", headers=None, message=None, send_body=True):
+        return self._CLASS_HTTP_RESP(code, data, headers, message, send_body)
+
     def req_error(self, code, text=None, exc=None, headers=None):
         return self._CLASS_REQ_ERROR(code, text, exc, headers)
 
-    def send_error_msg(self, code, text, headers=None):
-        return getattr(self, self._FUNC_SEND_ERROR)(code, text, headers)
+    def send_error_msg(self, code, message, headers=None):
+        return getattr(self, self._FUNC_SEND_ERROR)(code, message, headers)
 
     def log_enabled(self):
         return self._to_log
@@ -440,7 +461,12 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         if clen:
             self.wfile.write(data)
 
-    def send_error_explain(self, code, message=None, headers=None):
+    def _mk_error_explain_data(self, code, message, explain):
+        return self.error_message_format % {'code':    code,
+                                            'message': message,
+                                            'explain': explain}
+
+    def send_error_explain(self, code, message=None, headers=None, content_type=None):
         "do not use directly"
         if headers is None:
             headers = {}
@@ -458,31 +484,38 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
         if not isinstance(headers, dict):
             headers = {}
+
+        if not content_type:
+            if self._cmd and self._cmd.content_type:
+                content_type = self._cmd.content_type
+            else:
+                content_type = self._DEFAULT_CONTENT_TYPE
+
         if self._cmd and self._cmd.charset:
             charset = self._cmd.charset
         else:
             charset = DEFAULT_CHARSET
 
-        headers['Content-type'] = "text/html; charset=%s" % charset
+        headers['Content-type'] = "%s; charset=%s" % (content_type, charset)
 
-        data = self.error_message_format % {'code':     code,
-                                            'message':  message,
-                                            'explain':  explain}
-        self.end_response(HttpResponse(code, data, headers))
+        data = self._mk_error_explain_data(code, message, explain)
 
-    def send_error_msgtxt(self, code, text, headers=None):
+        self.end_response(self.build_response(code, data, headers))
+
+    def send_error_msgtxt(self, code, message, headers=None):
         "text will be in a <pre> bloc"
         if headers is None:
             headers = {}
 
-        if isinstance(text, (list, tuple)):
-            text = ''.join(text)
+        if isinstance(message, (list, tuple)):
+            message = ''.join(message)
         elif isinstance(text, dict):
-            text = repr(text)
+            message = repr(message)
 
         self.send_error_explain(code,
-                                ''.join(("<pre>\n", cgi.escape(text), "</pre>\n")),
-                                headers)
+                                ''.join(("<pre>\n", cgi.escape(message), "</pre>\n")),
+                                headers,
+                                "text/html")
 
     def send_exception(self, code, exc_info=None, headers=None):
         "send an error response including a backtrace to the client"
@@ -496,14 +529,14 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                             traceback.format_exception(*exc_info),
                             headers)
 
-    def send_error_json(self, code, text, headers=None):
+    def send_error_json(self, code, message, headers=None):
         "send an error to the client. text message is formatted in a json stream"
         if headers is None:
             headers = {}
 
         self.end_response(HttpResponseJson(code,
-                                           {'code':      code,
-                                            'message':   text},
+                                           {'code':    code,
+                                            'message': message},
                                            headers))
 
     def static_file(self, urlpath, response=None):
@@ -679,21 +712,30 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             LOG.error("invalid URI: %s", e)
             raise self.req_error(400, str(e))
 
-    def authenticate(self):
+    def authenticate(self, auth_users = None):
+        for x in ('HTTP_AUTH_USER', 'HTTP_AUTH_PASSWD'):
+            self._SERVER.pop(x, None)
+
         if not _AUTH:
             return
 
         auth    = self.headers.get('Authorization')
         if not auth:
-            return _AUTH.unauthorized()
+            raise _AUTH.unauthorized()
 
         allowed = _AUTH.valid_authorization(auth)
+
+        if None in (_AUTH.user, _AUTH.passwd):
+            return
 
         self._SERVER['HTTP_AUTH_USER']      = _AUTH.user
         self._SERVER['HTTP_AUTH_PASSWD']    = _AUTH.passwd
 
+        if auth_users and _AUTH.user not in auth_users:
+            raise _AUTH.unauthorized()
+
         if not allowed:
-            return _AUTH.unauthorized()
+            raise _AUTH.unauthorized()
 
     def set_cookie(self, name, value = '', expires = 0, path = '/', domain = '', secure = False, http_only = False):
         cook                    = Cookie.SimpleCookie()
@@ -760,9 +802,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                 self._to_log = False
 
             if self._cmd.to_auth:
-                res = self.authenticate()
-                if res:
-                    return res
+                self.authenticate(self._cmd.auth_users)
 
             if self._cmd.static:
                 if self._cmd.handler:
@@ -836,9 +876,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                 raise self.req_error(413)
 
             if self._cmd.to_auth:
-                res = self.authenticate()
-                if res:
-                    return res
+                self.authenticate(self._cmd.auth_users)
 
             if clen > 0:
                 payload       = self.rfile.read(clen)
@@ -902,7 +940,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                 raise
             else:
                 if not isinstance(res, HttpResponse):
-                    req = HttpResponse()
+                    req = self.build_response()
                     if send_body:
                         req.add_data(res)
                     req.set_send_body(send_body)
@@ -933,7 +971,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         "OPTIONS method"
-        req = HttpResponse(code = 204)
+        req = self.build_response(code = 204)
         req.add_header('Access-Control-Allow-Origin', "*")
         req.add_header('Access-Control-Allow-Methods', "OPTIONS, POST")
         req.add_header('Access-Control-Allow-Headers', "Origin, X-Requested-With, Content-Type, Accept, Authorization")
