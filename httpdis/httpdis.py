@@ -509,7 +509,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
         if isinstance(message, (list, tuple)):
             message = ''.join(message)
-        elif isinstance(text, dict):
+        elif isinstance(message, dict):
             message = repr(message)
 
         self.send_error_explain(code,
