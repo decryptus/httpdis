@@ -205,14 +205,15 @@ class HttpReqError(Exception):
     in a consistent way.
     """
 
-    def __init__(self, code, text=None, exc=None, headers=None):
+    def __init__(self, code, text=None, exc=None, headers=None, ctype=None):
         if headers is None:
             headers = {}
 
-        self.code = code
-        self.text = text
-        self.exc  = exc
-        msg       = text or BaseHTTPRequestHandler.responses[code][1]
+        self.code  = code
+        self.text  = text
+        self.exc   = exc
+        self.ctype = ctype or 'msg'
+        msg        = text or BaseHTTPRequestHandler.responses[code][1]
 
         if not isinstance(headers, dict):
             headers = {}
@@ -229,12 +230,13 @@ class HttpReqError(Exception):
         text = (self.text
                 or BaseHTTPRequestHandler.responses[self.code][1]
                 or "Unknown error")
-        req_handler.send_error_msg(self.code, text, self.headers)
+
+        getattr(req_handler, "send_error_%s" % self.ctype, 'send_error_msg')(self.code, text, self.headers)
 
 
 class HttpReqErrJson(HttpReqError):
     def __init__(self, code, text=None, exc=None, headers=None):
-        HttpReqError.__init__(self, code, text, exc, headers)
+        HttpReqError.__init__(self, code, text, exc, headers, ctype = 'json')
 
 
 HTTP_RESPONSE_CLASS = HttpResponse
@@ -310,7 +312,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
     """
 
     _DEFAULT_CONTENT_TYPE   = 'text/plain'
-    _ALLOWED_CONTENT_TYPES  = ()
+    _ALLOWED_CONTENT_TYPES  = []
     _ALLOWED_MULTIPART_FORM = True
     _CLASS_HTTP_RESP        = HTTP_RESPONSE_CLASS
     _CLASS_REQ_ERROR        = HTTP_REQERROR_CLASS
@@ -370,6 +372,24 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
     def version_string(self):
         return BaseHTTPRequestHandler.version_string(self).strip()
+
+    def permit_ctype(self, ctype):
+        if ctype:
+            self._ALLOWED_CONTENT_TYPES += [ctype.lower()]
+        return self
+
+    def forbid_ctype(self, ctype):
+        if ctype and ctype in self._ALLOWED_CONTENT_TYPES:
+            self._ALLOWED_CONTENT_TYPES.remove(ctype.lower())
+        return self
+
+    def permit_multipart(self):
+        self._ALLOWED_MULTIPART_FORM = True
+        return self
+
+    def forbid_multipart(self):
+        self._ALLOWED_MULTIPART_FORM = False
+        return self
 
     @staticmethod
     def parse_date(ims):
@@ -852,14 +872,15 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
             ctype    = self.headers.get('Content-Type')
             if ctype:
-                if ctype.lower().startswith('multipart/form-data'):
+                ctype = ctype.lower().split(';', 1)[0]
+                if ctype == 'multipart/form-data':
                     if not self._ALLOWED_MULTIPART_FORM:
                         raise self.req_error(501, "Not supported; Content-Type: %s", ctype)
                     multipart = True
                 elif self._ALLOWED_CONTENT_TYPES:
                     ct_found = False
                     for x in self._ALLOWED_CONTENT_TYPES:
-                        if ctype.lower().startswith(x):
+                        if ctype == x:
                             ct_found = True
                             break
                     if not ct_found:
@@ -893,7 +914,10 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                     charset = self._cmd.charset or DEFAULT_CHARSET
 
                     try:
-                        self._payload_params = self.parse_payload(payload, charset)
+                        if ctype == 'application/x-www-form-urlencoded':
+                            self._payload_params = urlparse.parse_qsl(payload)
+                        else:
+                            self._payload_params = self.parse_payload(payload, charset)
                     except ValueError, e:
                         raise self.req_error(415, text=str(e))
 
