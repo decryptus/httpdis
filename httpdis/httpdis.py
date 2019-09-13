@@ -1,24 +1,7 @@
-"""HTTPDIS"""
-
-__version__ = "$Revision$ $Date$"
-__license__ = """
-    Copyright (C) 2007-2011 Avencall
-    Copyright (C) 2012-2018 doowan
-
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-"""
-
+# -*- coding: utf-8 -*-
+# Copyright 2008-2019 The Wazo Authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""httpsdis.httpsdis"""
 
 # TODO: a configuration option to send the backtraces
 # or not to the client in error report
@@ -33,29 +16,42 @@ __license__ = """
 
 # TODO: split backtraces in syslog when they are too long
 
-import cgi
-import Cookie
 import email.utils
 import errno
 import json
 import logging
-import magic
 import os
-import re
 import select
 import signal
 import socket
 import sys
-import urlparse
 import time
 import traceback
 #import weakref
 
+import cgi
+try:
+    from cgi import escape as html_escape
+except ImportError:
+    from html import escape as html_escape
+
+import re
+try:
+    from re import _pattern_type as RePatternType
+except ImportError:
+    from re import Pattern as RePatternType
+
 from base64 import b64encode, b64decode
-from BaseHTTPServer import BaseHTTPRequestHandler
 from crypt import crypt
 from hashlib import sha1
-from urllib2 import Request
+
+from six.moves import http_cookies
+from six.moves.urllib import parse as urlparse, request as urlrequest
+from six.moves.BaseHTTPServer import BaseHTTPRequestHandler # pylint: disable=relative-import
+import six
+
+import magic
+
 from sonicprobe import helpers
 from sonicprobe.libs import threading_tcp_server, urisup
 
@@ -63,11 +59,6 @@ try:
     from rfc6266_parser import build_header, parse_headers
 except ImportError:
     from rfc6266 import build_header, parse_headers
-
-try:
-    from cStringIO import StringIO
-except ImportError:
-    from StringIO import StringIO
 
 
 BUFFER_SIZE     = 65536
@@ -102,7 +93,7 @@ DEFAULT_OPTIONS = {'auth_basic':        None,
                    'sys_version':       None}
 
 
-class Command(object):
+class Command(object): # pylint: disable=too-few-public-methods,useless-object-inheritance
     """
     Each registration results in an instance of this class being created.
     """
@@ -141,12 +132,12 @@ class Command(object):
             self.to_auth    = bool(to_auth)
 
 
-class HttpResponse(Request):
+class HttpResponse(urlrequest.Request):
     def __init__(self, code=200, data="", headers=None, message=None, send_body=True):
         if headers is None:
             headers = {}
 
-        Request.__init__(self, "", data=data, headers=headers)
+        urlrequest.Request.__init__(self, "http://127.0.0.1", data=data, headers=headers)
         self.code      = code
         self.send_body = send_body
         self.message   = message
@@ -173,11 +164,11 @@ class HttpResponse(Request):
         return self.send_body
 
     def add_data(self, data):
-        Request.add_data(self, data)
+        self.data = data
         return self
 
-    def add_header(self, key, value):
-        Request.add_header(self, key, value)
+    def add_header(self, key, val):
+        urlrequest.Request.add_header(self, key, val)
         return self
 
 
@@ -243,7 +234,7 @@ HTTP_RESPONSE_CLASS = HttpResponse
 HTTP_REQERROR_CLASS = HttpReqError
 
 
-class HttpAuthentication(object):
+class HttpAuthentication(object): # pylint: disable=useless-object-inheritance
     def __init__(self, htpasswd, realm=None):
         self.htpasswd   = htpasswd
         self.realm      = realm
@@ -299,7 +290,8 @@ class HttpAuthentication(object):
 
         return req_error(code = 401, headers = headers)
 
-    def forbidden(self, req_error = None):
+    @staticmethod
+    def forbidden(req_error = None):
         if not req_error:
             req_error = HTTP_REQERROR_CLASS
 
@@ -341,6 +333,9 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
     def log_enabled(self):
         return self._to_log
+
+    def get_server_vars(self):
+        return self._SERVER
 
     def set_log(self, enable = True):
         self._to_log = bool(enable)
@@ -400,12 +395,12 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         except (TypeError, ValueError, IndexError):
             return None
 
-    def log_error(self, *args):
+    def log_error(self, xformat, *args): # pylint: disable=arguments-differ
         """
         There is more information in log_request(), which is always called
         => do nothing
         """
-        pass
+        pass # pylint: disable=unnecessary-pass
 
     def log_request(self, code='-', size='-'):
         """
@@ -434,8 +429,8 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                 message = ''
 
         if self.request_version != 'HTTP/0.9':
-            self.wfile.write("%s %d %s\r\n" %
-                             ("HTTP/1.1", code, message))
+            self.wfile.write(six.ensure_binary("%s %d %s\r\n"
+                                               % (self.protocol_version, code, message)))
         self.send_header('Server', self.version_string())
         self.send_header('Date', self.date_time_string())
 
@@ -449,7 +444,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
            and self.command != 'HEAD' \
            and code >= 200 \
            and code not in (204, 304):
-            data = response.get_data()
+            data = response.data or ""
             clen = len(data)
         else:
             data = ""
@@ -479,12 +474,13 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         if clen:
-            self.wfile.write(data)
+            self.wfile.write(six.ensure_binary(data))
 
-    def _mk_error_explain_data(self, code, message, explain):
-        return self.error_message_format % {'code':    code,
-                                            'message': message,
-                                            'explain': explain}
+    def _mk_error_explain_data(self, code, message, explain, charset):
+        return six.ensure_text(self.error_message_format % {'code':    code,
+                                                            'message': message,
+                                                            'explain': explain},
+                               charset)
 
     def send_error_explain(self, code, message=None, headers=None, content_type=None):
         "do not use directly"
@@ -518,7 +514,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
         headers['Content-type'] = "%s; charset=%s" % (content_type, charset)
 
-        data = self._mk_error_explain_data(code, message, explain)
+        data = self._mk_error_explain_data(code, message, explain, charset)
 
         self.end_response(self.build_response(code, data, headers))
 
@@ -533,7 +529,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             message = repr(message)
 
         self.send_error_explain(code,
-                                ''.join(("<pre>\n", cgi.escape(message), "</pre>\n")),
+                                ''.join(("<pre>\n", html_escape(message, True), "</pre>\n")), # pylint: disable=deprecated-method
                                 headers,
                                 "text/html")
 
@@ -565,7 +561,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         mimetype    = None
         disposition = None
 
-        if isinstance(self._cmd.name, re._pattern_type) and self._cmd.replacement:
+        if isinstance(self._cmd.name, RePatternType) and self._cmd.replacement: # pylint: disable=protected-access
             filename = self._cmd.name.sub(self._cmd.replacement, urlpath)
         else:
             filename = urlpath
@@ -644,14 +640,15 @@ class HttpReqHandler(BaseHTTPRequestHandler):
     @staticmethod
     def querylist_to_dict(query):
         if not isinstance(query, (list, tuple)):
-            return
+            return None
 
         ret = {}
 
         for x in query:
-            if len(x) < 1:
+            if not x:
                 continue
-            elif len(x) > 1:
+
+            if len(x) > 1:
                 value = x[1]
             else:
                 value = None
@@ -668,7 +665,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
             key         = x[0][:lbracket]
 
-            if not ret.has_key(key):
+            if key not in ret:
                 ret[key] = {}
 
             matched     = re.findall(r'\[([^\]]*)\]', x[0][lbracket:])
@@ -686,13 +683,13 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
             for i, k in enumerate(matched):
                 if k == '':
-                    while ref.has_key(j):
+                    while j in ref:
                         j += 1
                     k = j
 
                 if i == (nb - 1):
                     ref[k] = value
-                elif not ref.has_key(k) \
+                elif k not in ref \
                 or (nb > i and not isinstance(ref[k], dict)):
                     ref[k] = {}
 
@@ -728,7 +725,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                 self._query_params = self.querylist_to_dict(query)
 
             return self._path
-        except urisup.InvalidURIError, e:
+        except urisup.InvalidURIError as e:
             LOG.error("invalid URI: %s", e)
             raise self.req_error(400, str(e))
 
@@ -748,8 +745,8 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         if None in (_AUTH.user, _AUTH.passwd):
             return
 
-        self._SERVER['HTTP_AUTH_USER']      = _AUTH.user
-        self._SERVER['HTTP_AUTH_PASSWD']    = _AUTH.passwd
+        self._SERVER['HTTP_AUTH_USER']   = _AUTH.user
+        self._SERVER['HTTP_AUTH_PASSWD'] = _AUTH.passwd
 
         if auth_users and _AUTH.user not in auth_users:
             raise _AUTH.unauthorized()
@@ -758,7 +755,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             raise _AUTH.unauthorized()
 
     def set_cookie(self, name, value = '', expires = 0, path = '/', domain = '', secure = False, http_only = False):
-        cook                    = Cookie.SimpleCookie()
+        cook                    = http_cookies.SimpleCookie()
         cook[name]              = value
         cook[name]['expires']   = expires
         cook[name]['path']      = path
@@ -770,12 +767,16 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
     def read_cookies(self):
         if 'cookie' in self.headers:
-            return Cookie.SimpleCookie(self.headers['cookie'])
+            return http_cookies.SimpleCookie(self.headers['cookie'])
 
-    def parse_payload(self, data, charset):
+        return None
+
+    @staticmethod
+    def parse_payload(data, charset): # pylint: disable=unused-argument
         return urlparse.parse_qsl(data)
 
-    def response_dumps(self, data):
+    @staticmethod
+    def response_dumps(data, charset): # pylint: disable=unused-argument
         if isinstance(data, bool):
             data = int(data)
 
@@ -818,6 +819,8 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             if not self._cmd:
                 raise self.req_error(404)
 
+            charset = self._cmd.charset or DEFAULT_CHARSET
+
             if not self._cmd.to_log:
                 self._to_log = False
 
@@ -833,7 +836,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             res = self._cmd.handler(self)
 
             if not isinstance(res, HttpResponse):
-                return self.response_dumps(res)
+                return self.response_dumps(res, charset)
 
             return res
         finally:
@@ -866,6 +869,8 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             if not self._cmd:
                 raise self.req_error(404)
 
+            charset  = self._cmd.charset or DEFAULT_CHARSET
+
             tenc     = self.headers.get('Transfer-Encoding')
             if tenc and tenc.lower() != 'identity':
                 raise self.req_error(501, "Not supported; Transfer-Encoding: %s" % tenc)
@@ -887,13 +892,14 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                         raise self.req_error(501, "Not supported; Content-Type: %s" % ctype)
 
             try:
-                clen = long(self.headers.get('Content-Length') or 0)
+                clen = int(self.headers.get('Content-Length') or 0)
             except (ValueError, TypeError):
                 raise self.req_error(411)
 
             if clen < 0:
                 raise self.req_error(411)
-            elif clen > long(_OPTIONS['max_body_size']):
+
+            if clen > int(_OPTIONS['max_body_size']):
                 raise self.req_error(413)
 
             if self._cmd.to_auth:
@@ -901,30 +907,28 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
             if clen > 0:
                 payload       = self.rfile.read(clen)
-                self._payload = StringIO(payload)
+                self._payload = six.BytesIO(payload)
 
                 if multipart:
                     try:
                         self._payload_params = cgi.FieldStorage(environ = {'REQUEST_METHOD': 'POST'},
                                                                 fp      = self._payload,
                                                                 headers = self.headers)
-                    except Exception, e:
+                    except Exception as e:
                         raise self.req_error(415, text=str(e))
                 else:
-                    charset = self._cmd.charset or DEFAULT_CHARSET
-
                     try:
                         if ctype == 'application/x-www-form-urlencoded':
                             self._payload_params = urlparse.parse_qsl(payload)
                         else:
                             self._payload_params = self.parse_payload(payload, charset)
-                    except ValueError, e:
+                    except ValueError as e:
                         raise self.req_error(415, text=str(e))
 
             res = self._cmd.handler(self)
 
             if not isinstance(res, HttpResponse):
-                return self.response_dumps(res)
+                return self.response_dumps(res, charset)
 
             return res
         finally:
@@ -954,7 +958,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                 path    = self._pathify() # pylint: disable-msg=W0612
                 cmd     = path[1:]
                 res     = execute(cmd)
-            except HttpReqError, e:
+            except HttpReqError as e:
                 e.report(self)
             except Exception:
                 try:
@@ -972,7 +976,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                     req = res
 
                 self.end_response(req)
-        except socket.error, e:
+        except socket.error as e:
             if e.errno in (errno.ECONNRESET, errno.EPIPE):
                 return
             LOG.exception("exception - cmd=%r - method=%r", cmd, self.command)
@@ -1053,7 +1057,7 @@ def register(handler,
     ref_cmd = _NCMD
     is_reg  = False
 
-    if isinstance(name, re._pattern_type):
+    if isinstance(name, RePatternType): # pylint: disable=protected-access
         key         = name.pattern
         ref_cmd     = _RCMD
         is_reg      = True
@@ -1122,7 +1126,7 @@ def sigterm_handler(signum, stack_frame):
     # pylint: disable-msg=W0613
     global _KILLED
 
-    for name, cmd in _COMMANDS.iteritems():
+    for name, cmd in six.iteritems(_COMMANDS):
         if cmd.at_stop:
             LOG.info("at_stop: %r", name)
             cmd.at_stop()
@@ -1148,12 +1152,12 @@ def run(options, http_req_handler = HttpReqHandler):
             setattr(http_req_handler, x, _OPTIONS[x])
 
     _HTTP_SERVER = threading_tcp_server.KillableThreadingHTTPServer(
-                       _OPTIONS,
-                       (_OPTIONS['listen_addr'], _OPTIONS['listen_port']),
-                       http_req_handler,
-                       name = "httpdis")
+        _OPTIONS,
+        (_OPTIONS['listen_addr'], _OPTIONS['listen_port']),
+        http_req_handler,
+        name = "httpdis")
 
-    for name, cmd in _COMMANDS.iteritems():
+    for name, cmd in six.iteritems(_COMMANDS):
         if cmd.at_start:
             LOG.info("at_start: %r", name)
             cmd.at_start(options)
@@ -1162,7 +1166,7 @@ def run(options, http_req_handler = HttpReqHandler):
     while not _KILLED:
         try:
             _HTTP_SERVER.serve_until_killed()
-        except (socket.error, select.error), why:
+        except (socket.error, select.error) as why:
             if errno.EINTR == why[0]:
                 LOG.debug("interrupted system call")
             elif errno.EBADF == why[0] and _KILLED:
@@ -1186,7 +1190,7 @@ def init(options, use_sigterm_handler=True):
         _OPTIONS = DEFAULT_OPTIONS.copy()
         _OPTIONS.update(options)
     else:
-        for optname, optvalue in DEFAULT_OPTIONS.iteritems():
+        for optname, optvalue in six.iteritems(DEFAULT_OPTIONS):
             if hasattr(options, optname):
                 _OPTIONS[optname] = getattr(options, optname)
             else:
@@ -1206,7 +1210,7 @@ def init(options, use_sigterm_handler=True):
         _AUTH = HttpAuthentication(_OPTIONS['auth_basic_file'],
                                    realm = _OPTIONS['auth_basic']).parse_file()
 
-    for name, cmd in _COMMANDS.iteritems():
+    for name, cmd in six.iteritems(_COMMANDS):
         if cmd.safe_init:
             LOG.info("safe_init: %r", name)
             cmd.safe_init(_OPTIONS)

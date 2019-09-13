@@ -1,0 +1,15 @@
+Source: python-httpdis
+Section: admin
+Priority: optional
+Maintainer: Adrien Delle Cave
+Uploaders: Adrien Delle Cave
+Build-Depends: debhelper (>= 7), dh-python, python (>= 2.7), python-setuptools
+Standards-Version: 3.9.4
+X-Python-Version: >= 2.7
+Homepage: https://github.com/decryptus/httpdis
+
+Package: python-httpdis
+Architecture: all
+Homepage: https://github.com/decryptus/httpdis
+Depends: ${misc:Depends}, lsb-release, python-dev (>= 2.7), python-magic, python-pip, python-lepl
+Description: HTTPdis python libraries

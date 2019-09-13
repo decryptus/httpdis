@@ -1,0 +1,125 @@
+python-httpdis (0.6.1) unstable; urgency=medium
+
+  * Bug method _mk_error_explain_data.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Fri, 13 Sep 2019 20:45:04 +0200
+
+python-httpdis (0.6.0) unstable; urgency=medium
+
+  * Fixed version.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Fri, 13 Sep 2019 16:14:56 +0200
+
+python-httpdis (0.5.18) unstable; urgency=medium
+
+  * Added py3 compatibility.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Fri, 13 Sep 2019 16:14:15 +0200
+
+python-httpdis (0.5.17) unstable; urgency=medium
+
+  * Reviewed requirements.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Tue, 27 Aug 2019 16:08:52 +0200
+
+python-httpdis (0.5.16) unstable; urgency=medium
+
+  * Reviewed requirements.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Mon, 26 Aug 2019 14:38:11 +0200
+
+python-httpdis (0.5.15) unstable; urgency=medium
+
+  * Added permit_ctype and forbid_ctype methods.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Mon, 25 Feb 2019 13:22:06 +0100
+
+python-httpdis (0.5.14) unstable; urgency=medium
+
+  * Fixed HttpReqErrJson.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Sun, 24 Feb 2019 21:50:20 +0100
+
+python-httpdis (0.5.13) unstable; urgency=medium
+
+  * Fixed wrong variable.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Fri, 22 Feb 2019 19:19:42 +0100
+
+python-httpdis (0.5.12) unstable; urgency=medium
+
+  * Reviewed error functions and classes.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Thu, 24 Jan 2019 11:22:30 +0100
+
+python-httpdis (0.5.11) unstable; urgency=medium
+
+  * Fixed delete key HTTP_AUTH_USER and HTTP_AUTH_PASSWD.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Wed, 23 Jan 2019 21:02:32 +0100
+
+python-httpdis (0.5.10) unstable; urgency=medium
+
+  * Fixed auth users.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Wed, 23 Jan 2019 19:20:25 +0100
+
+python-httpdis (0.5.9) unstable; urgency=medium
+
+  * Added auth users by route.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Wed, 23 Jan 2019 18:42:04 +0100
+
+python-httpdis (0.5.8) unstable; urgency=medium
+
+  * Fixed httpdis errors implementation.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Mon, 10 Dec 2018 11:42:07 +0100
+
+python-httpdis (0.5.7) unstable; urgency=medium
+
+  * Fixed httpdis errors format.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Mon, 10 Dec 2018 11:22:45 +0100
+
+python-httpdis (0.5.6) unstable; urgency=medium
+
+  * Reviewed requirements.txt.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Tue, 02 Oct 2018 03:48:08 +0200
+
+python-httpdis (0.5.5) unstable; urgency=medium
+
+  * Reviewed debian/postinst.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Mon, 24 Sep 2018 11:43:16 +0200
+
+python-httpdis (0.5.4) unstable; urgency=medium
+
+  * Modified response_dumps.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Mon, 24 Sep 2018 08:56:45 +0200
+
+python-httpdis (0.5.3) unstable; urgency=medium
+
+  * Fixed response_dumps if data is boolean.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Sun, 23 Sep 2018 13:40:57 +0200
+
+python-httpdis (0.5.2) unstable; urgency=medium
+
+  * Reviewed requirements.txt.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Sun, 23 Sep 2018 11:44:00 +0200
+
+python-httpdis (0.5.1) unstable; urgency=medium
+
+  * Missing HttpResponseJson in httpdis.ext.httpdis_json.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Sun, 23 Sep 2018 11:41:34 +0200
+
+python-httpdis (0.5) unstable; urgency=medium
+
+  * Initial release.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Mon, 27 Nov 2017 17:02:14 +0100

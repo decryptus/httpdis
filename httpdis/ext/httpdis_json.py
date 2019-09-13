@@ -1,27 +1,14 @@
-"""HTTPDIS EXT JSON"""
-
-__version__ = "$Revision$ $Date$"
-__license__ = """
-    Copyright (C) 2018 doowan
-
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-"""
+# -*- coding: utf-8 -*-
+# Copyright 2018-2019 Adrien Delle Cave
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""httpdis.ext.json"""
 
 import json
 import logging
+import six
 
 from httpdis import httpdis
+# pylint: disable=unused-import
 from httpdis.httpdis import (init,
                              HttpReqError,
                              HttpReqErrJson,
@@ -44,13 +31,13 @@ HTTP_REQERROR_CLASS = HttpReqErrJson
 def _encode_if(value, encoding=DEFAULT_CHARSET):
     # transform value returned by json.loads to something similar to what
     # cjson.decode would have returned
-    if isinstance(value, unicode):
-        return value.encode(encoding)
+    if isinstance(value, (six.text_type, six.binary_type)):
+        return six.ensure_str(value, encoding)
     if isinstance(value, list):
         return [_encode_if(v, encoding) for v in value]
     if isinstance(value, dict):
         return dict((_encode_if(k, encoding), _encode_if(v, encoding)) for
-                    (k, v) in value.iteritems())
+                    (k, v) in six.iteritems(value))
     return value
 
 
@@ -60,16 +47,19 @@ class HttpReqHandler(httpdis.HttpReqHandler):
                               'application/x-www-form-urlencoded']
     _FUNC_SEND_ERROR       = 'send_error_json'
 
-    def parse_payload(self, data, charset):
+    @staticmethod
+    def parse_payload(data, charset):
         return _encode_if(json.loads(data), charset)
 
-    def response_dumps(self, data):
-        return json.dumps(data)
+    @staticmethod
+    def response_dumps(data, charset):
+        return json.dumps(_encode_if(data, charset))
 
-    def _mk_error_explain_data(self, code, message, explain):
+    def _mk_error_explain_data(self, code, message, explain, charset):
         return self.response_dumps({'code':    code,
                                     'message': message,
-                                    'explain': explain})
+                                    'explain': explain},
+                                   charset)
 
 
 def run(options, http_req_handler = HttpReqHandler):
