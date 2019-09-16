@@ -1,3 +1,9 @@
+python-httpdis (0.6.2) unstable; urgency=medium
+
+  * Reviewed requirements.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Mon, 16 Sep 2019 11:05:20 +0200
+
 python-httpdis (0.6.1) unstable; urgency=medium
 
   * Bug method _mk_error_explain_data.
