@@ -1,6 +1,6 @@
 LEPL
 python-magic
-sonicprobe>=0.3.3
+sonicprobe>=0.3.6
 rfc6266
 rfc6266-parser
 six>=1.12.0
