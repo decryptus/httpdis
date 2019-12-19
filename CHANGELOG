@@ -1,3 +1,9 @@
+python-httpdis (0.6.8) unstable; urgency=medium
+
+  * Reviewed requirements.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Thu, 19 Dec 2019 06:23:03 +0100
+
 python-httpdis (0.6.7) unstable; urgency=medium
 
   * Reviewed requirements.
