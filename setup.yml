@@ -3,9 +3,9 @@ name: httpdis
 description: httpdis
 author: Adrien Delle Cave
 author_email: pypi@doowan.net
-copyright: '2019 Adrien Delle Cave'
-release: '0.6.8'
-version: '0.6.8'
+copyright: '2020 Adrien Delle Cave'
+release: '0.6.9'
+version: '0.6.9'
 license: License GPL-3
 url: https://github.com/decryptus/httpdis
 python_requires:
