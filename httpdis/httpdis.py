@@ -623,7 +623,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                 return res.set_code(304).set_send_body(False)
 
         f           = None
-        body        = ""
+        body        = six.binary_type()
 
         if self.command != 'HEAD':
             with open(filename, 'rb') as f:
