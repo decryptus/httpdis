@@ -45,10 +45,10 @@ from base64 import b64encode, b64decode
 from crypt import crypt
 from hashlib import sha1
 
+from six import BytesIO, binary_type, ensure_binary, ensure_text, iteritems
 from six.moves import http_cookies
 from six.moves.urllib import parse as urlparse, request as urlrequest
 from six.moves.BaseHTTPServer import BaseHTTPRequestHandler # pylint: disable=relative-import
-import six
 
 import magic
 
@@ -429,8 +429,8 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                 message = ''
 
         if self.request_version != 'HTTP/0.9':
-            self.wfile.write(six.ensure_binary("%s %d %s\r\n"
-                                               % (self.protocol_version, code, message)))
+            self.wfile.write(ensure_binary("%s %d %s\r\n"
+                                           % (self.protocol_version, code, message)))
         self.send_header('Server', self.version_string())
         self.send_header('Date', self.date_time_string())
 
@@ -474,13 +474,13 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         if clen:
-            self.wfile.write(six.ensure_binary(data))
+            self.wfile.write(ensure_binary(data))
 
     def _mk_error_explain_data(self, code, message, explain, charset):
-        return six.ensure_text(self.error_message_format % {'code':    code,
-                                                            'message': message,
-                                                            'explain': explain},
-                               charset)
+        return ensure_text(self.error_message_format % {'code':    code,
+                                                        'message': message,
+                                                        'explain': explain},
+                           charset)
 
     def send_error_explain(self, code, message=None, headers=None, content_type=None):
         "do not use directly"
@@ -623,7 +623,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                 return res.set_code(304).set_send_body(False)
 
         f           = None
-        body        = six.binary_type()
+        body        = binary_type()
 
         if self.command != 'HEAD':
             with open(filename, 'rb') as f:
@@ -907,7 +907,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
             if clen > 0:
                 payload       = self.rfile.read(clen)
-                self._payload = six.BytesIO(payload)
+                self._payload = BytesIO(payload)
 
                 if multipart:
                     try:
@@ -1126,7 +1126,7 @@ def sigterm_handler(signum, stack_frame):
     # pylint: disable-msg=W0613
     global _KILLED
 
-    for name, cmd in six.iteritems(_COMMANDS):
+    for name, cmd in iteritems(_COMMANDS):
         if cmd.at_stop:
             LOG.info("at_stop: %r", name)
             cmd.at_stop()
@@ -1157,7 +1157,7 @@ def run(options, http_req_handler = HttpReqHandler):
         http_req_handler,
         name = "httpdis")
 
-    for name, cmd in six.iteritems(_COMMANDS):
+    for name, cmd in iteritems(_COMMANDS):
         if cmd.at_start:
             LOG.info("at_start: %r", name)
             cmd.at_start(options)
@@ -1190,7 +1190,7 @@ def init(options, use_sigterm_handler=True):
         _OPTIONS = DEFAULT_OPTIONS.copy()
         _OPTIONS.update(options)
     else:
-        for optname, optvalue in six.iteritems(DEFAULT_OPTIONS):
+        for optname, optvalue in iteritems(DEFAULT_OPTIONS):
             if hasattr(options, optname):
                 _OPTIONS[optname] = getattr(options, optname)
             else:
@@ -1210,7 +1210,7 @@ def init(options, use_sigterm_handler=True):
         _AUTH = HttpAuthentication(_OPTIONS['auth_basic_file'],
                                    realm = _OPTIONS['auth_basic']).parse_file()
 
-    for name, cmd in six.iteritems(_COMMANDS):
+    for name, cmd in iteritems(_COMMANDS):
         if cmd.safe_init:
             LOG.info("safe_init: %r", name)
             cmd.safe_init(_OPTIONS)

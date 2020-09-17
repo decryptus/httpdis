@@ -5,7 +5,8 @@
 
 import json
 import logging
-import six
+
+from six import binary_type, ensure_str, iteritems, text_type
 
 from httpdis import httpdis
 # pylint: disable=unused-import
@@ -31,13 +32,13 @@ HTTP_REQERROR_CLASS = HttpReqErrJson
 def _encode_if(value, encoding=DEFAULT_CHARSET):
     # transform value returned by json.loads to something similar to what
     # cjson.decode would have returned
-    if isinstance(value, (six.text_type, six.binary_type)):
-        return six.ensure_str(value, encoding)
+    if isinstance(value, (text_type, binary_type)):
+        return ensure_str(value, encoding)
     if isinstance(value, list):
         return [_encode_if(v, encoding) for v in value]
     if isinstance(value, dict):
         return dict((_encode_if(k, encoding), _encode_if(v, encoding)) for
-                    (k, v) in six.iteritems(value))
+                    (k, v) in iteritems(value))
     return value
 
 
