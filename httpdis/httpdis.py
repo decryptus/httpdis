@@ -61,36 +61,43 @@ except ImportError:
     from rfc6266 import build_header, parse_headers
 
 
-BUFFER_SIZE     = 65536
-DEFAULT_CHARSET = 'utf-8'
+BUFFER_SIZE      = 65536
+DEFAULT_CHARSET  = 'utf-8'
 
-LOG             = logging.getLogger('httpdis') # pylint: disable-msg=C0103
+LOG              = logging.getLogger('httpdis') # pylint: disable-msg=C0103
 
-_METHODS        = ('HEAD',
-                   'GET',
-                   'DELETE',
-                   'PATCH',
-                   'POST',
-                   'PUT')
+_METHODS         = ('HEAD',
+                    'GET',
+                    'DELETE',
+                    'PATCH',
+                    'POST',
+                    'PUT')
 
-_AUTH           = None
-_COMMANDS       = {}
-_NCMD           = {}
-_RCMD           = {}
-_HTTP_SERVER    = None
-_KILLED         = False
-_OPTIONS        = {}
-DEFAULT_OPTIONS = {'auth_basic':        None,
-                   'auth_basic_file':   None,
-                   'testmethods':       False,
-                   'max_body_size':     1 * 1024 * 1024,
-                   'max_workers':       1,
-                   'max_requests':      0,
-                   'max_life_time':     0,
-                   'listen_addr':       None,
-                   'listen_port':       None,
-                   'server_version':    None,
-                   'sys_version':       None}
+_END_EXC_HEADERS = ('Cache-control',
+                    'Connection',
+                    'Content-type'
+                    'Content-length'
+                    'Pragma',
+                    'Server')
+
+_AUTH            = None
+_COMMANDS        = {}
+_NCMD            = {}
+_RCMD            = {}
+_HTTP_SERVER     = None
+_KILLED          = False
+_OPTIONS         = {}
+DEFAULT_OPTIONS  = {'auth_basic':      None,
+                    'auth_basic_file': None,
+                    'testmethods':     False,
+                    'max_body_size':   1 * 1024 * 1024,
+                    'max_workers':     1,
+                    'max_requests':    0,
+                    'max_life_time':   0,
+                    'listen_addr':     None,
+                    'listen_port':     None,
+                    'server_version':  None,
+                    'sys_version':     None}
 
 
 class Command(object): # pylint: disable=too-few-public-methods,useless-object-inheritance
@@ -111,18 +118,18 @@ class Command(object): # pylint: disable=too-few-public-methods,useless-object-i
                  content_type,
                  to_auth,
                  to_log):
-        self.handler        = handler
-        self.name           = name
-        self.op             = op
-        self.safe_init      = safe_init
-        self.at_start       = at_start
-        self.at_stop        = at_stop
-        self.static         = static
-        self.root           = root
-        self.replacement    = replacement
-        self.charset        = charset
-        self.content_type   = content_type
-        self.to_log         = to_log
+        self.handler      = handler
+        self.name         = name
+        self.op           = op
+        self.safe_init    = safe_init
+        self.at_start     = at_start
+        self.at_stop      = at_stop
+        self.static       = static
+        self.root         = root
+        self.replacement  = replacement
+        self.charset      = charset
+        self.content_type = content_type
+        self.to_log       = to_log
 
         if isinstance(to_auth, (list, tuple)):
             self.auth_users = list(filter(to_auth, helpers.has_len))
@@ -164,7 +171,7 @@ class HttpResponse(urlrequest.Request):
         return self.send_body
 
     def add_data(self, data):
-        self.data = data
+        self.data = data # pylint: disable=attribute-defined-outside-init
         return self
 
     def add_header(self, key, val):
@@ -236,11 +243,11 @@ HTTP_REQERROR_CLASS = HttpReqError
 
 class HttpAuthentication(object): # pylint: disable=useless-object-inheritance
     def __init__(self, htpasswd, realm=None):
-        self.htpasswd   = htpasswd
-        self.realm      = realm
-        self.users      = {}
-        self.user       = None
-        self.passwd     = None
+        self.htpasswd = htpasswd
+        self.realm    = realm
+        self.users    = {}
+        self.user     = None
+        self.passwd   = None
 
     def parse_file(self):
         f = None
@@ -267,16 +274,16 @@ class HttpAuthentication(object): # pylint: disable=useless-object-inheritance
         if kind.strip() != 'Basic':
             return False
 
-        (user, _, passwd)   = b64decode(data.rstrip()).partition(':')
-        self.user           = user
-        self.passwd         = passwd
-        secret              = self.users.get(user)
+        (user, _, passwd) = b64decode(data.rstrip()).partition(':')
+        self.user         = user
+        self.passwd       = passwd
+        secret            = self.users.get(user)
 
         if not secret:
             return False
 
         if secret.startswith('{SHA}'):
-            xhash   = sha1()
+            xhash = sha1()
             xhash.update(passwd)
             return secret == ("{SHA}%s" % b64encode(xhash.digest()))
 
@@ -468,7 +475,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(clen))
 
         for header, value in response.header_items():
-            if header not in ('Cache-control', 'Pragma', 'Connection', 'Content-type', 'Content-length', 'Server'):
+            if header not in _END_EXC_HEADERS:
                 self.send_header(header, value)
 
         self.end_headers()
@@ -628,10 +635,10 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         if self.command != 'HEAD':
             with open(filename, 'rb') as f:
                 while True:
-                    buf     = f.read(BUFFER_SIZE)
+                    buf = f.read(BUFFER_SIZE)
                     if not buf:
                         break
-                    body   += buf
+                    body += buf
             if f:
                 f.close()
 
@@ -709,17 +716,21 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         (path, query, fragment)
         """
         try:
+            path = self.path
+            if helpers.has_len(path):
+                path = re.sub(r'^/+', '/', path)
+
             (path,
              query,
-             self._fragment) = urisup.uri_help_split(self.path)[2:]
+             self._fragment) = urisup.uri_help_split(path)[2:]
 
             if not path:
-                path = "/"
+                path = '/'
 
-            if path[0] != "/":
+            if path[0] != '/':
                 raise urisup.InvalidURIError('path %r does not start with "/"' % path)
 
-            self._path = re.sub("^/+", "/", path, 1)
+            self._path = re.sub(r'/+', '/', path)
 
             if query:
                 self._query_params = self.querylist_to_dict(query)
@@ -755,13 +766,13 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             raise _AUTH.unauthorized()
 
     def set_cookie(self, name, value = '', expires = 0, path = '/', domain = '', secure = False, http_only = False):
-        cook                    = http_cookies.SimpleCookie()
-        cook[name]              = value
-        cook[name]['expires']   = expires
-        cook[name]['path']      = path
-        cook[name]['domain']    = domain
-        cook[name]['secure']    = secure
-        cook[name]['httponly']  = http_only
+        cook                   = http_cookies.SimpleCookie()
+        cook[name]             = value
+        cook[name]['expires']  = expires
+        cook[name]['path']     = path
+        cook[name]['domain']   = domain
+        cook[name]['secure']   = secure
+        cook[name]['httponly'] = http_only
 
         self.send_header('Set-Cookie', cook.output(header = ''))
 
@@ -932,32 +943,32 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
             return res
         finally:
-            payload                 = None
-            self._payload           = None
-            self._payload_params    = None
-            self._query_params      = {}
+            payload              = None
+            self._payload        = None
+            self._payload_params = None
+            self._query_params   = {}
 
     def common_req(self, execute, send_body=True):
         "Common code for GET and POST requests"
-        self._SERVER            = {'CLIENT_ADDR_HOST': self.client_address[0],
-                                   'CLIENT_ADDR_PORT': self.client_address[1]}
+        self._SERVER         = {'CLIENT_ADDR_HOST': self.client_address[0],
+                                'CLIENT_ADDR_PORT': self.client_address[1]}
 
-        self._to_log            = True
-        self._cmd               = None
+        self._to_log         = True
+        self._cmd            = None
 
-        self._payload           = None
-        self._path              = None
-        self._payload_params    = None
-        self._query_params      = {}
-        self._fragment          = None
+        self._payload        = None
+        self._path           = None
+        self._payload_params = None
+        self._query_params   = {}
+        self._fragment       = None
 
-        (cmd, res, req)         = (None, None, None)
+        (cmd, res, req)      = (None, None, None)
 
         try:
             try:
-                path    = self._pathify() # pylint: disable-msg=W0612
-                cmd     = path[1:]
-                res     = execute(cmd)
+                path = self._pathify() # pylint: disable-msg=W0612
+                cmd  = path[1:]
+                res  = execute(cmd)
             except HttpReqError as e:
                 e.report(self)
             except Exception:
@@ -1021,17 +1032,17 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
 def register(handler,
              op,
-             safe_init      = None,
-             at_start       = None,
-             name           = None,
-             at_stop        = None,
-             static         = False,
-             root           = None,
-             replacement    = None,
-             charset        = DEFAULT_CHARSET,
-             content_type   = None,
-             to_auth        = False,
-             to_log         = True):
+             safe_init    = None,
+             at_start     = None,
+             name         = None,
+             at_stop      = None,
+             static       = False,
+             root         = None,
+             replacement  = None,
+             charset      = DEFAULT_CHARSET,
+             content_type = None,
+             to_auth      = False,
+             to_log       = True):
     """
     Register a command
     @handler: function to execute when the command is received
