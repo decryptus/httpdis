@@ -891,7 +891,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                 ctype = ctype.lower().split(';', 1)[0]
                 if ctype == 'multipart/form-data':
                     if not self._ALLOWED_MULTIPART_FORM:
-                        raise self.req_error(501, "Not supported; Content-Type: %s", ctype)
+                        raise self.req_error(501, "Not supported; Content-Type: %s" % ctype)
                     multipart = True
                 elif self._ALLOWED_CONTENT_TYPES:
                     ct_found = False
