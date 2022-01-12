@@ -783,8 +783,8 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         return None
 
     @staticmethod
-    def parse_payload(data, charset): # pylint: disable=unused-argument
-        return urlparse.parse_qsl(data)
+    def parse_payload(data, charset):
+        return urlparse.parse_qsl(ensure_text(data, encoding = charset))
 
     @staticmethod
     def response_dumps(data, charset): # pylint: disable=unused-argument
@@ -930,7 +930,8 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                 else:
                     try:
                         if ctype == 'application/x-www-form-urlencoded':
-                            self._payload_params = urlparse.parse_qsl(payload)
+                            self._payload_params = urlparse.parse_qsl(ensure_text(payload,
+                                                                                  encoding = charset))
                         else:
                             self._payload_params = self.parse_payload(payload, charset)
                     except ValueError as e:
