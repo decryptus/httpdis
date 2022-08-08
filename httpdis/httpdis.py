@@ -48,7 +48,7 @@ from hashlib import sha1
 from six import BytesIO, binary_type, ensure_binary, ensure_text, iteritems
 from six.moves import http_cookies
 from six.moves.urllib import parse as urlparse, request as urlrequest
-from six.moves.BaseHTTPServer import BaseHTTPRequestHandler # pylint: disable=relative-import
+from six.moves.BaseHTTPServer import BaseHTTPRequestHandler
 
 import magic
 
@@ -60,9 +60,10 @@ try:
 except ImportError:
     from rfc6266 import build_header, parse_headers
 
+from httpdis.config import (BUFFER_SIZE, # pylint: disable=unused-import
+                            DEFAULT_CHARSET,
+                            get_default_options)
 
-BUFFER_SIZE      = 65536
-DEFAULT_CHARSET  = 'utf-8'
 
 LOG              = logging.getLogger('httpdis') # pylint: disable-msg=C0103
 
@@ -355,7 +356,10 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         return self._cmd
 
     def get_headers(self):
-        return self.headers.dict
+        if hasattr(self.headers, 'dict'):
+            return self.headers.dict
+
+        return dict(self.headers.items())
 
     def get_method(self):
         return self.command
@@ -1187,9 +1191,6 @@ def run(options, http_req_handler = HttpReqHandler):
                 raise
 
     LOG.info("exiting")
-
-def get_default_options():
-    return DEFAULT_OPTIONS.copy()
 
 def init(options, use_sigterm_handler=True):
     """

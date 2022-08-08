@@ -1,6 +1,6 @@
 LEPL
 python-magic
-sonicprobe>=0.3.43
+sonicprobe>=0.3.44
 rfc6266 ; python_version < '3.4'
 rfc6266-parser ; python_version < '3.6'
 uc-rfc6266-parser ; python_version >= '3.6'

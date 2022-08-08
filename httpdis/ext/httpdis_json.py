@@ -6,7 +6,10 @@
 import json
 import logging
 
-from six import binary_type, ensure_str, iteritems, text_type
+from six import (binary_type,
+                 ensure_str,
+                 iteritems,
+                 text_type)
 
 from httpdis import httpdis
 # pylint: disable=unused-import
@@ -15,15 +18,16 @@ from httpdis.httpdis import (init,
                              HttpReqErrJson,
                              HttpResponse,
                              HttpResponseJson,
-                             get_default_options,
                              register,
                              sigterm_handler,
                              stop)
 
+from httpdis.config import (DEFAULT_CHARSET,
+                            get_default_options)
+
 
 LOG                 = logging.getLogger('httpdis.ext.json') # pylint: disable-msg=C0103
 CONTENT_TYPE        = 'application/json'
-DEFAULT_CHARSET     = 'utf-8'
 
 HTTP_RESPONSE_CLASS = HttpResponseJson
 HTTP_REQERROR_CLASS = HttpReqErrJson
