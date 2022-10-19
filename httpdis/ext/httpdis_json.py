@@ -18,6 +18,7 @@ from httpdis.httpdis import (init,
                              HttpReqErrJson,
                              HttpResponse,
                              HttpResponseJson,
+                             KillableThreadingHTTPServer,
                              register,
                              sigterm_handler,
                              stop)
@@ -67,5 +68,5 @@ class HttpReqHandler(httpdis.HttpReqHandler):
                                    charset)
 
 
-def run(options, http_req_handler = HttpReqHandler):
-    return httpdis.run(options, http_req_handler)
+def run(options, http_req_handler = HttpReqHandler, http_server_class = KillableThreadingHTTPServer):
+    return httpdis.run(options, http_req_handler, http_server_class)

@@ -53,16 +53,17 @@ from six.moves.BaseHTTPServer import BaseHTTPRequestHandler
 import magic
 
 from sonicprobe import helpers
-from sonicprobe.libs import threading_tcp_server, urisup
+from sonicprobe.libs import urisup
+from sonicprobe.libs.threading_tcp_server import KillableThreadingHTTPServer
 
 try:
     from rfc6266_parser import build_header, parse_headers
 except ImportError:
     from rfc6266 import build_header, parse_headers
 
-from httpdis.config import (BUFFER_SIZE, # pylint: disable=unused-import
-                            DEFAULT_CHARSET,
-                            get_default_options)
+from .config import (BUFFER_SIZE, # pylint: disable=unused-import
+                     DEFAULT_CHARSET,
+                     get_default_options)
 
 
 LOG              = logging.getLogger('httpdis') # pylint: disable-msg=C0103
@@ -1156,7 +1157,7 @@ def sigterm_handler(signum, stack_frame):
 def stop():
     sigterm_handler(None, None)
 
-def run(options, http_req_handler = HttpReqHandler):
+def run(options, http_req_handler = HttpReqHandler, http_server_class = KillableThreadingHTTPServer):
     """
     Start and execute the server
     """
@@ -1167,7 +1168,7 @@ def run(options, http_req_handler = HttpReqHandler):
         if _OPTIONS.get(x) is not None:
             setattr(http_req_handler, x, _OPTIONS[x])
 
-    _HTTP_SERVER = threading_tcp_server.KillableThreadingHTTPServer(
+    _HTTP_SERVER = http_server_class(
         _OPTIONS,
         (_OPTIONS['listen_addr'], _OPTIONS['listen_port']),
         http_req_handler,

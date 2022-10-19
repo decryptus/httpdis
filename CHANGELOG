@@ -1,3 +1,15 @@
+python-httpdis (0.6.26) unstable; urgency=medium
+
+  * Added possibility to customize HTTP Server class.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Wed, 19 Oct 2022 10:29:30 +0200
+
+python-httpdis (0.6.25) unstable; urgency=medium
+
+  * Fixed httpdis.config.
+
+ -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Tue, 09 Aug 2022 01:31:14 +0200
+
 python-httpdis (0.6.24) unstable; urgency=medium
 
   * Fixed httpdis.config.
