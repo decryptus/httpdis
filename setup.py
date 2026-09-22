@@ -2,6 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 import os
+import io
 import yaml
 from setuptools import find_packages, setup
 
@@ -16,7 +17,7 @@ if os.path.isfile(setup_config):
     setup_cfg = yaml.safe_load(open(setup_config, 'r').read())
 
 if os.path.isfile(readme_file):
-    long_desc = open(readme_file, 'r').read()
+    long_desc = io.open(readme_file, 'r', encoding='utf-8').read()
     long_desc_content_type = 'text/markdown'
 
 setup(

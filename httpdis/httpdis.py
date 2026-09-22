@@ -17,6 +17,9 @@
 # TODO: split backtraces in syslog when they are too long
 
 import email.utils
+import binascii
+import threading
+from hmac import compare_digest
 import errno
 import json
 import logging
@@ -42,7 +45,10 @@ except ImportError:
     from re import Pattern as RePatternType
 
 from base64 import b64encode, b64decode
-from crypt import crypt
+try:
+    from crypt import crypt
+except ImportError:
+    from legacycrypt import crypt
 from hashlib import sha1
 
 from six import BytesIO, binary_type, ensure_binary, ensure_text, iteritems
@@ -77,8 +83,8 @@ _METHODS         = ('HEAD',
 
 _END_EXC_HEADERS = ('Cache-control',
                     'Connection',
-                    'Content-type'
-                    'Content-length'
+                    'Content-type',
+                    'Content-length',
                     'Pragma',
                     'Server')
 
@@ -134,7 +140,7 @@ class Command(object): # pylint: disable=too-few-public-methods,useless-object-i
         self.to_log       = to_log
 
         if isinstance(to_auth, (list, tuple)):
-            self.auth_users = list(filter(to_auth, helpers.has_len))
+            self.auth_users = list(filter(helpers.has_len, to_auth))
             self.to_auth    = True
         else:
             self.auth_users = []
@@ -231,7 +237,7 @@ class HttpReqError(Exception):
                 or BaseHTTPRequestHandler.responses[self.code][1]
                 or "Unknown error")
 
-        getattr(req_handler, "send_error_%s" % self.ctype, 'send_error_msg')(self.code, text, self.headers)
+        getattr(req_handler, "send_error_%s" % self.ctype, req_handler.send_error_msg)(self.code, text, self.headers)
 
 
 class HttpReqErrJson(HttpReqError):
@@ -248,8 +254,7 @@ class HttpAuthentication(object): # pylint: disable=useless-object-inheritance
         self.htpasswd = htpasswd
         self.realm    = realm
         self.users    = {}
-        self.user     = None
-        self.passwd   = None
+        self._credentials = threading.local()
 
     def parse_file(self):
         f = None
@@ -270,26 +275,39 @@ class HttpAuthentication(object): # pylint: disable=useless-object-inheritance
 
         return self
 
+    @property
+    def user(self):
+        return getattr(self._credentials, 'user', None)
+
+    @property
+    def passwd(self):
+        return getattr(self._credentials, 'passwd', None)
+
     def valid_authorization(self, authorization):
-        (kind, data) = authorization.split(' ', 1)
-
-        if kind.strip() != 'Basic':
+        self._credentials.user = self._credentials.passwd = None
+        try:
+            kind, data = authorization.split(None, 1)
+            if kind.lower() != 'basic':
+                return False
+            decoded = b64decode(ensure_binary(data.strip()))
+            user, separator, passwd = decoded.partition(b':')
+            if not separator:
+                return False
+            user = user.decode('utf-8')
+            password = passwd.decode('utf-8')
+        except (ValueError, TypeError, UnicodeError, binascii.Error):
             return False
-
-        (user, _, passwd) = b64decode(data.rstrip()).partition(':')
-        self.user         = user
-        self.passwd       = passwd
-        secret            = self.users.get(user)
-
+        secret = self.users.get(user)
         if not secret:
             return False
-
         if secret.startswith('{SHA}'):
-            xhash = sha1()
-            xhash.update(passwd)
-            return secret == ("{SHA}%s" % b64encode(xhash.digest()))
-
-        return secret == crypt(passwd, secret[:2])
+            calculated = '{SHA}' + b64encode(sha1(passwd).digest()).decode('ascii')
+        else:
+            calculated = crypt(password, secret)
+        if not calculated or not compare_digest(ensure_binary(secret), ensure_binary(calculated)):
+            return False
+        self._credentials.user, self._credentials.passwd = user, password
+        return True
 
     def unauthorized(self, req_error = None):
         if not req_error:
@@ -456,7 +474,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
            and self.command != 'HEAD' \
            and code >= 200 \
            and code not in (204, 304):
-            data = response.data or ""
+            data = ensure_binary(response.data or "")
             clen = len(data)
         else:
             data = ""
@@ -480,7 +498,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(clen))
 
         for header, value in response.header_items():
-            if header not in _END_EXC_HEADERS:
+            if header.lower() not in tuple(h.lower() for h in _END_EXC_HEADERS):
                 self.send_header(header, value)
 
         self.end_headers()
@@ -568,7 +586,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                                            headers))
 
     def static_file(self, urlpath, response=None):
-        root        = os.path.abspath(self._cmd.root) + os.sep
+        root        = os.path.realpath(self._cmd.root).rstrip(os.sep) + os.sep
         res         = HttpResponse()
         mimetype    = None
         disposition = None
@@ -578,7 +596,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         else:
             filename = urlpath
 
-        filename    = os.path.abspath(os.path.join(root, filename.strip('/\\')))
+        filename    = os.path.realpath(os.path.join(root, filename.strip('/\\')))
 
         if not filename.startswith(root):
             raise self.req_error(403, "Access denied.")
@@ -631,7 +649,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         if_modified = self.headers.get('If-Modified-Since')
         if if_modified:
             if_modified = self.parse_date(if_modified.split(';')[0].strip())
-            if if_modified >= int(stats.st_mtime):
+            if if_modified is not None and if_modified >= int(stats.st_mtime):
                 return res.set_code(304).set_send_body(False)
 
         f           = None
@@ -639,11 +657,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
         if self.command != 'HEAD':
             with open(filename, 'rb') as f:
-                while True:
-                    buf = f.read(BUFFER_SIZE)
-                    if not buf:
-                        break
-                    body += buf
+                body = f.read()
             if f:
                 f.close()
 
@@ -750,7 +764,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             self._SERVER.pop(x, None)
 
         if not _AUTH:
-            return
+            raise self.req_error(401, 'Authentication is not configured')
 
         auth    = self.headers.get('Authorization')
         if not auth:
@@ -758,8 +772,8 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
         allowed = _AUTH.valid_authorization(auth)
 
-        if None in (_AUTH.user, _AUTH.passwd):
-            return
+        if not allowed or None in (_AUTH.user, _AUTH.passwd):
+            raise _AUTH.unauthorized()
 
         self._SERVER['HTTP_AUTH_USER']   = _AUTH.user
         self._SERVER['HTTP_AUTH_PASSWD'] = _AUTH.passwd
@@ -923,6 +937,8 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
             if clen > 0:
                 payload       = self.rfile.read(clen)
+                if len(payload) != clen:
+                    raise self.req_error(400, 'Incomplete request body')
                 self._payload = BytesIO(payload)
 
                 if multipart:
@@ -979,7 +995,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                 e.report(self)
             except Exception:
                 try:
-                    self.send_exception(500) # XXX 500
+                    self.send_error_msg(500, 'Internal server error')
                 except Exception: # pylint: disable-msg=W0703
                     pass
                 raise
@@ -1184,9 +1200,9 @@ def run(options, http_req_handler = HttpReqHandler, http_server_class = Killable
         try:
             _HTTP_SERVER.serve_until_killed()
         except (socket.error, select.error) as why:
-            if errno.EINTR == why[0]:
+            if errno.EINTR == why.errno:
                 LOG.debug("interrupted system call")
-            elif errno.EBADF == why[0] and _KILLED:
+            elif errno.EBADF == why.errno and _KILLED:
                 LOG.debug("server close")
             else:
                 raise
@@ -1198,7 +1214,10 @@ def init(options, use_sigterm_handler=True):
     Must be called just after registration, before anything else
     """
     # pylint: disable-msg=W0613
-    global _AUTH, _OPTIONS
+    global _AUTH, _OPTIONS, _KILLED
+
+    _AUTH = None
+    _KILLED = False
 
     if isinstance(options, dict):
         _OPTIONS = DEFAULT_OPTIONS.copy()
