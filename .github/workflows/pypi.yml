@@ -23,13 +23,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: decryptus/sonicprobe
-          ref: 39caf71b8bcbfd2a04cd9775a7b721071face4b0
+          ref: 23fd66928a2f4fc6129468c7b7a237f88243f8d2
           path: dependencies/sonicprobe
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: decryptus/dwho
-          ref: 7ecbf94a0b0533c6fae37f63e3d04b70d44b3ec4
+          ref: 8bf98047c0bfc4d250b6c0a24b6ece191582f7d0
           path: dependencies/dwho
           persist-credentials: false
       - uses: actions/setup-python@v5
