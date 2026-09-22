@@ -103,3 +103,5 @@ Already-tagged versions are not replaced by ordinary master commits.
 
 License: GPL-3.0-or-later. Original authors and Wazo/Proformatique copyrights are
 preserved in the source files.
+
+See the [September 2026 code and architecture review](docs/REVIEW.md) (French).

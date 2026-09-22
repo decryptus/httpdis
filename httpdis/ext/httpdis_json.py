@@ -8,6 +8,7 @@ import logging
 
 from six import (binary_type,
                  ensure_str,
+                 ensure_text,
                  iteritems,
                  text_type)
 
@@ -55,7 +56,7 @@ class HttpReqHandler(httpdis.HttpReqHandler):
 
     @staticmethod
     def parse_payload(data, charset):
-        return _encode_if(json.loads(data), charset)
+        return _encode_if(json.loads(ensure_text(data, charset)), charset)
 
     @staticmethod
     def response_dumps(data, charset):

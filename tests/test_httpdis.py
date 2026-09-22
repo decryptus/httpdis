@@ -10,7 +10,10 @@ from httpdis import httpdis as h
 
 class HttpTests(unittest.TestCase):
     def handler(self):
-        handler = object.__new__(h.HttpReqHandler)
+        class TestHandler(h.HttpReqHandler):
+            def __init__(self):
+                pass
+        handler = TestHandler()
         handler.command = 'GET'
         handler.wfile = BytesIO()
         handler.headers = {}
