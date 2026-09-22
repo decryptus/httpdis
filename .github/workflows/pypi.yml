@@ -20,18 +20,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          repository: decryptus/sonicprobe
-          ref: 23fd66928a2f4fc6129468c7b7a237f88243f8d2
-          path: dependencies/sonicprobe
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          repository: decryptus/dwho
-          ref: 8bf98047c0bfc4d250b6c0a24b6ece191582f7d0
-          path: dependencies/dwho
-          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -42,7 +30,7 @@ jobs:
       - run: python .github/scripts/check-distributions.py
       - name: Test the wheel and source distribution
         run: |
-          python -m pip install dist/*.whl dependencies/sonicprobe dependencies/dwho mock
+          python -m pip install dist/*.whl "sonicprobe==0.3.52" "dwho==0.3.61" mock
           cd "$(mktemp -d)"
           python -m unittest discover -s "$GITHUB_WORKSPACE/tests" -v
           python -m pip install --force-reinstall --no-deps "$GITHUB_WORKSPACE"/dist/*.tar.gz
