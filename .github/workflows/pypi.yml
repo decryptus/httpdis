@@ -1,0 +1,89 @@
+name: Test and publish to PyPI
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: pypi-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+  build:
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: decryptus/sonicprobe
+          ref: 39caf71b8bcbfd2a04cd9775a7b721071face4b0
+          path: dependencies/sonicprobe
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: decryptus/dwho
+          ref: 7ecbf94a0b0533c6fae37f63e3d04b70d44b3ec4
+          path: dependencies/dwho
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: python -m twine check --strict dist/*
+      - run: python .github/scripts/check-distributions.py
+      - name: Test the wheel and source distribution
+        run: |
+          python -m pip install dist/*.whl dependencies/sonicprobe dependencies/dwho mock
+          cd "$(mktemp -d)"
+          python -m unittest discover -s "$GITHUB_WORKSPACE/tests" -v
+          python -m pip install --force-reinstall --no-deps "$GITHUB_WORKSPACE"/dist/*.tar.gz
+          python -m unittest discover -s "$GITHUB_WORKSPACE/tests" -v
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+          if-no-files-found: error
+  release:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      publish: ${{ steps.release.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: release
+        run: bash .github/scripts/select-release.sh
+      - name: Create the validated version tag
+        if: steps.release.outputs.create == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA"
+  publish:
+    needs: release
+    if: needs.release.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
