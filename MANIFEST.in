@@ -1,0 +1,2 @@
+include README.md LICENSE VERSION RELEASE setup.yml requirements.txt
+recursive-include tests *.py

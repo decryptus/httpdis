@@ -1,7 +1,9 @@
-LEPL
+LEPL; python_version < '3.6'
 python-magic
 sonicprobe>=0.3.49
 rfc6266 ; python_version < '3.4'
-rfc6266-parser ; python_version < '3.6'
+rfc6266-parser ; python_version >= '3.4' and python_version < '3.6'
 uc-rfc6266-parser ; python_version >= '3.6'
 six>=1.13.0
+legacy-cgi; python_version >= '3.13'
+legacycrypt; python_version >= '3.13'
