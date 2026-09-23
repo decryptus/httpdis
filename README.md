@@ -51,7 +51,7 @@ Routes and options are process-global; use a separate process for independent ap
 
 ## Request body limits
 
-In the development version, `register(..., max_body_size=...)` sets the body limit
+Since HTTPdis 0.6.28, `register(..., max_body_size=...)` sets the body limit
 for a named or regex route. It applies to POST, PUT and PATCH before reading or
 parsing the body; oversized requests return HTTP 413.
 
