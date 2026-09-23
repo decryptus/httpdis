@@ -51,7 +51,12 @@ except ImportError:
     from legacycrypt import crypt
 from hashlib import sha1
 
-from six import BytesIO, binary_type, ensure_binary, ensure_text, iteritems
+from six import (BytesIO,
+                 binary_type,
+                 ensure_binary,
+                 ensure_text,
+                 integer_types,
+                 iteritems)
 from six.moves import http_cookies
 from six.moves.urllib import parse as urlparse, request as urlrequest
 from six.moves.BaseHTTPServer import BaseHTTPRequestHandler
@@ -125,19 +130,27 @@ class Command(object): # pylint: disable=too-few-public-methods,useless-object-i
                  charset,
                  content_type,
                  to_auth,
-                 to_log):
-        self.handler      = handler
-        self.name         = name
-        self.op           = op
-        self.safe_init    = safe_init
-        self.at_start     = at_start
-        self.at_stop      = at_stop
-        self.static       = static
-        self.root         = root
-        self.replacement  = replacement
-        self.charset      = charset
-        self.content_type = content_type
-        self.to_log       = to_log
+                 to_log,
+                 max_body_size = None):
+        if max_body_size is not None \
+           and (isinstance(max_body_size, bool) \
+                or not isinstance(max_body_size, integer_types) \
+                or max_body_size < 0):
+            raise ValueError("max_body_size must be a non-negative integer or None")
+
+        self.max_body_size = max_body_size
+        self.handler       = handler
+        self.name          = name
+        self.op            = op
+        self.safe_init     = safe_init
+        self.at_start      = at_start
+        self.at_stop       = at_stop
+        self.static        = static
+        self.root          = root
+        self.replacement   = replacement
+        self.charset       = charset
+        self.content_type  = content_type
+        self.to_log        = to_log
 
         if isinstance(to_auth, (list, tuple)):
             self.auth_users = list(filter(helpers.has_len, to_auth))
@@ -929,7 +942,11 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             if clen < 0:
                 raise self.req_error(411)
 
-            if clen > int(_OPTIONS['max_body_size']):
+            max_body_size = self._cmd.max_body_size
+            if max_body_size is None:
+                max_body_size = int(_OPTIONS['max_body_size'])
+
+            if clen > max_body_size:
                 raise self.req_error(413)
 
             if self._cmd.to_auth:
@@ -1054,17 +1071,18 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
 def register(handler,
              op,
-             safe_init    = None,
-             at_start     = None,
-             name         = None,
-             at_stop      = None,
-             static       = False,
-             root         = None,
-             replacement  = None,
-             charset      = DEFAULT_CHARSET,
-             content_type = None,
-             to_auth      = False,
-             to_log       = True):
+             safe_init     = None,
+             at_start      = None,
+             name          = None,
+             at_stop       = None,
+             static        = False,
+             root          = None,
+             replacement   = None,
+             charset       = DEFAULT_CHARSET,
+             content_type  = None,
+             to_auth       = False,
+             to_log        = True,
+             max_body_size = None):
     """
     Register a command
     @handler: function to execute when the command is received
@@ -1080,6 +1098,7 @@ def register(handler,
     @content_type: content_type
     @to_auth: use basic authentification if True
     @to_log: log request if True
+    @max_body_size: maximum request body bytes; None inherits the global limit
 
     prototypes:
         handler(args)
@@ -1135,7 +1154,8 @@ def register(handler,
                   charset,
                   content_type,
                   to_auth,
-                  to_log)
+                  to_log,
+                  max_body_size)
 
     for method in methods:
         if not is_reg:

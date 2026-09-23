@@ -49,6 +49,29 @@ Handlers receive a request with `get_path()`, `query_params()`, `payload_params(
 lists, compiled regular expressions and `safe_init`, `at_start`, `at_stop` hooks.
 Routes and options are process-global; use a separate process for independent apps.
 
+## Request body limits
+
+Since HTTPdis 0.6.28, `register(..., max_body_size=...)` sets the body limit
+for a named or regex route. It applies to POST, PUT and PATCH before reading or
+parsing the body; oversized requests return HTTP 413.
+
+```python
+server.register(action_handler, 'POST', name='v1/actions', max_body_size=1024)
+server.register(notification_handler, 'POST', name='v1/notifications',
+                max_body_size=64 * 1024)
+```
+
+Define your handlers before registering them. The value is a non-negative integer
+number of **bytes**. `0` allows only an empty body; `None` or an omitted argument
+uses the current global `max_body_size` option (1 MiB by default). A route value
+replaces the global default and may be smaller or larger. It does not change other
+routes or the global option. Negative values, booleans, floats and strings are
+rejected during registration.
+
+Existing registrations and positional arguments remain compatible. JSON services
+using `httpdis.ext.httpdis_json.register` share the same option. GET/HEAD/DELETE
+continue to use the query handler; this option does not change their behavior.
+
 ## Authentication and deployment
 
 Configure `auth_basic_file` with a trusted htpasswd file and `auth_basic` with the
