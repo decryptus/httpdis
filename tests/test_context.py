@@ -252,6 +252,9 @@ class ContextTests(unittest.TestCase):
         import sys
         script = '''
 import sys
+# Python 3.5/3.6's stdlib HTTP server imports argparse for its own launcher.
+# Load that transport dependency first; project/application imports stay guarded.
+from six.moves.BaseHTTPServer import BaseHTTPRequestHandler
 try:
     import builtins
 except ImportError:
