@@ -54,6 +54,7 @@ jobs:
         run: |
           python -m pip install . ./consumers/dwho "sonicprobe==0.3.53" mock packaging jmespath prometheus-client
           AUTON_PACKAGE=autond python -m pip install ./consumers/auton
+          AUTON_PACKAGE=auton python -m pip install ./consumers/auton
           python -m pip install --no-deps ./consumers/covenant
           python -m pip install ./consumers/monit-docker
       - name: Verify the candidate and exercise consumers outside the HTTPdis checkout
@@ -108,4 +109,5 @@ jobs:
           docker run --rm -v "$GITHUB_WORKSPACE:/src:ro"
           python:${{ matrix.python }}
           bash /src/.github/scripts/test-legacy.sh
+
 
