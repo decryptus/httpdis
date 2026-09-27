@@ -1,3 +1,12 @@
+python-httpdis (0.6.29) unstable; urgency=medium
+
+  * Add isolated HTTP/JSON server contexts for routes, authentication and lifecycle.
+  * Keep legacy module-level APIs and direct global reassignment compatibility.
+  * Bind handler subclasses per server and centralize default options.
+  * Make context shutdown idempotent and clean transport resources after failures.
+
+ -- Codex <codex@openai.com>  Mon, 28 Sep 2026 01:40:00 +0200
+
 python-httpdis (0.6.26) unstable; urgency=medium
 
   * Added possibility to customize HTTP Server class.
