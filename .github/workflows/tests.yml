@@ -26,13 +26,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: decryptus/dwho
-          ref: e9bbe111856c29d6f365f5ad4e2cae158322c1d2
+          ref: b9e46064ff87a8910a1f7450498c2c5fe4083c73
           path: consumers/dwho
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: decryptus/auton
-          ref: c6f9256710f067cd24a084ed8ecd9a175be97301
+          ref: c98565679ad1738ad51321089dcfaee6e16a6fa8
           path: consumers/auton
           persist-credentials: false
       - uses: actions/checkout@v4
@@ -54,6 +54,7 @@ jobs:
         run: |
           python -m pip install . ./consumers/dwho "sonicprobe==0.3.53" mock packaging jmespath prometheus-client
           AUTON_PACKAGE=autond python -m pip install ./consumers/auton
+          AUTON_PACKAGE=auton python -m pip install ./consumers/auton
           python -m pip install --no-deps ./consumers/covenant
           python -m pip install ./consumers/monit-docker
       - name: Verify the candidate and exercise consumers outside the HTTPdis checkout
@@ -108,4 +109,5 @@ jobs:
           docker run --rm -v "$GITHUB_WORKSPACE:/src:ro"
           python:${{ matrix.python }}
           bash /src/.github/scripts/test-legacy.sh
+
 
