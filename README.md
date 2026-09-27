@@ -128,3 +128,71 @@ License: GPL-3.0-or-later. Original authors and Wazo/Proformatique copyrights ar
 preserved in the source files.
 
 See the [September 2026 code and architecture review](docs/REVIEW.md) (French).
+
+
+### Independent embedded servers
+
+Use `HttpServerContext` when multiple HTTPdis servers must coexist in one process.
+Each context owns its routes, options, authentication object and lifecycle state:
+
+```python
+from httpdis.ext.httpdis_json import HttpServerContext
+
+api = HttpServerContext()
+api.register(lambda request: {'status': 'ready'}, 'GET', name='health')
+api.init({'listen_addr': '127.0.0.1', 'listen_port': 8666,
+          'max_body_size': 1048576})
+api.run()  # Blocking; another thread or the launcher may call api.stop().
+```
+
+`httpdis.httpdis.HttpServerContext` uses the plain HTTP handler;
+`httpdis.ext.httpdis_json.HttpServerContext` uses the JSON handler. The registration
+arguments and route callbacks match the existing module API. Callbacks can obtain
+the owning context through `request.get_context()`. Application services should
+still receive explicit decoded values and caller identity, not HTTP requests.
+
+`run(options=None, http_req_handler=..., http_server_class=...)` binds a private
+handler subclass, so server version settings and mutable content-type lists do
+not modify the supplied handler class or another server. Omitting `options`
+passes the context's initialized options to `at_start`; supplying it preserves
+the historical callback argument behavior. `context.server` exposes the running
+transport (including the actual port when listening on port 0).
+
+For a separately constructed stdlib-compatible HTTP server, use
+`context.bind_handler(YourHandler)` or assign `server.httpdis_context = context`
+before serving requests. The bound handler carries its context explicitly.
+
+Register routes and initialize before serving. A context rejects concurrent
+`run()` calls and reinitialization while running. `stop()` affects only that
+context and is idempotent until the next `init()`. A stopped context must be
+initialized before restarting. Reinitialization retains registered routes, as
+with the historical API. This is not a hot-reconfiguration interface. Hooks still
+run per registered method/route entry; sharing application objects in callbacks
+is the caller's responsibility. Transport shutdown retains Sonicprobe's existing
+worker behavior; it does not forcibly cancel running application callbacks.
+
+Signals remain process-wide. Context initialization does **not** install handlers
+unless `use_sigterm_handler=True` is explicitly requested. In an embedded process,
+let the launcher choose which contexts to stop.
+
+### Compatibility with the global API
+
+The module-level `register`, `init`, `run`, `stop` and `sigterm_handler` functions
+remain available with their existing signatures, including the JSON wrappers.
+They delegate to a default context. Historical `_COMMANDS`, `_NCMD`, `_RCMD`,
+`_OPTIONS`, `_AUTH`, `_HTTP_SERVER` and `_KILLED` attributes still reflect that
+context, including direct reassignment. Handlers used without an explicit context
+continue to use this default. Global `init()` still installs signal handlers by
+default. These global calls remain a single shared server configuration; use
+explicit contexts for independent servers.
+
+Routes, authentication, response formats, route/global body-limit fallback and
+lifecycle callback arguments remain compatible. Handler classes are now bound
+through a subclass rather than modified in place. Repeated `stop()` calls no
+longer repeat shutdown hooks. Startup/serving failures close the created socket,
+and shutdown-hook failures still trigger transport cleanup.
+
+The default schema is defined once in `httpdis.config`. Both historical
+`DEFAULT_OPTIONS` import paths remain independent dictionaries with the same
+initial values; `get_default_options()` returns a fresh dictionary. Mutating an
+export is not a way to reconfigure an already initialized context.

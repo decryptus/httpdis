@@ -69,5 +69,16 @@ class HttpReqHandler(httpdis.HttpReqHandler):
                                    charset)
 
 
+class HttpServerContext(httpdis.HttpServerContext):
+    """Independent server context using the JSON request handler by default."""
+    def bind_handler(self, handler=HttpReqHandler):
+        return httpdis.HttpServerContext.bind_handler(self, handler)
+
+    def run(self, options=None, http_req_handler=HttpReqHandler,
+            http_server_class=KillableThreadingHTTPServer):
+        return httpdis.HttpServerContext.run(self, options, http_req_handler, http_server_class)
+
+
 def run(options, http_req_handler = HttpReqHandler, http_server_class = KillableThreadingHTTPServer):
     return httpdis.run(options, http_req_handler, http_server_class)
+
