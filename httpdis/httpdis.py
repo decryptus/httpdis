@@ -100,17 +100,8 @@ _RCMD            = {}
 _HTTP_SERVER     = None
 _KILLED          = False
 _OPTIONS         = {}
-DEFAULT_OPTIONS  = {'auth_basic':      None,
-                    'auth_basic_file': None,
-                    'testmethods':     False,
-                    'max_body_size':   1 * 1024 * 1024,
-                    'max_workers':     1,
-                    'max_requests':    0,
-                    'max_life_time':   0,
-                    'listen_addr':     None,
-                    'listen_port':     None,
-                    'server_version':  None,
-                    'sys_version':     None}
+DEFAULT_OPTIONS  = get_default_options()
+_SERVER_VERSION_OPTIONS = ('server_version', 'sys_version')
 
 
 class Command(object): # pylint: disable=too-few-public-methods,useless-object-inheritance
@@ -361,6 +352,12 @@ class HttpReqHandler(BaseHTTPRequestHandler):
     _query_params           = {}
     _fragment               = None
 
+
+    def get_context(self):
+        context = getattr(self, '_httpdis_context', None)
+        if context is not None:
+            return context
+        return getattr(getattr(self, 'server', None), 'httpdis_context', _DEFAULT_CONTEXT)
 
     def build_response(self, code=200, data="", headers=None, message=None, send_body=True):
         return self._CLASS_HTTP_RESP(code, data, headers, message, send_body)
@@ -773,29 +770,30 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             raise self.req_error(400, str(e))
 
     def authenticate(self, auth_users = None):
+        auth_context = self.get_context().auth
         for x in ('HTTP_AUTH_USER', 'HTTP_AUTH_PASSWD'):
             self._SERVER.pop(x, None)
 
-        if not _AUTH:
+        if not auth_context:
             raise self.req_error(401, 'Authentication is not configured')
 
         auth    = self.headers.get('Authorization')
         if not auth:
-            raise _AUTH.unauthorized()
+            raise auth_context.unauthorized()
 
-        allowed = _AUTH.valid_authorization(auth)
+        allowed = auth_context.valid_authorization(auth)
 
-        if not allowed or None in (_AUTH.user, _AUTH.passwd):
-            raise _AUTH.unauthorized()
+        if not allowed or None in (auth_context.user, auth_context.passwd):
+            raise auth_context.unauthorized()
 
-        self._SERVER['HTTP_AUTH_USER']   = _AUTH.user
-        self._SERVER['HTTP_AUTH_PASSWD'] = _AUTH.passwd
+        self._SERVER['HTTP_AUTH_USER']   = auth_context.user
+        self._SERVER['HTTP_AUTH_PASSWD'] = auth_context.passwd
 
-        if auth_users and _AUTH.user not in auth_users:
-            raise _AUTH.unauthorized()
+        if auth_users and auth_context.user not in auth_users:
+            raise auth_context.unauthorized()
 
         if not allowed:
-            raise _AUTH.unauthorized()
+            raise auth_context.unauthorized()
 
     def set_cookie(self, name, value = '', expires = 0, path = '/', domain = '', secure = False, http_only = False):
         cook                   = http_cookies.SimpleCookie()
@@ -839,22 +837,23 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         """
         Callback for .execute_command() for DELETE/GET/HEAD requests
         """
+        context = self.get_context()
         res  = None
         ckey = "%s /%s" % (self.command, cmd)
 
         if not isinstance(self._query_params, dict):
             self._query_params = {}
 
-        if ckey in _NCMD:
-            self._cmd = _NCMD[ckey]
+        if ckey in context.named_commands:
+            self._cmd = context.named_commands[ckey]
         else:
-            for key in sorted(_RCMD, key=len, reverse=True):
+            for key in sorted(context.regex_commands, key=len, reverse=True):
                 if not key.startswith("%s " % self.command):
                     continue
 
-                m = _RCMD[key].name.match(cmd)
+                m = context.regex_commands[key].name.match(cmd)
                 if m:
-                    self._cmd = _RCMD[key]
+                    self._cmd = context.regex_commands[key]
                     self._query_params.update(m.groupdict())
                     break
 
@@ -889,22 +888,23 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         """
         Callback for .execute_command() for PATCH/POST/PUT requests
         """
+        context = self.get_context()
         multipart = False
         ckey      = "%s /%s" % (self.command, cmd)
 
         if not isinstance(self._query_params, dict):
             self._query_params = {}
 
-        if ckey in _NCMD:
-            self._cmd = _NCMD[ckey]
+        if ckey in context.named_commands:
+            self._cmd = context.named_commands[ckey]
         else:
-            for key in sorted(_RCMD, key=len, reverse=True):
+            for key in sorted(context.regex_commands, key=len, reverse=True):
                 if not key.startswith("%s " % self.command):
                     continue
 
-                m = _RCMD[key].name.match(cmd)
+                m = context.regex_commands[key].name.match(cmd)
                 if m:
-                    self._cmd = _RCMD[key]
+                    self._cmd = context.regex_commands[key]
                     self._query_params.update(m.groupdict())
                     break
 
@@ -944,7 +944,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
             max_body_size = self._cmd.max_body_size
             if max_body_size is None:
-                max_body_size = int(_OPTIONS['max_body_size'])
+                max_body_size = int(context.options['max_body_size'])
 
             if clen > max_body_size:
                 raise self.req_error(413)
@@ -1069,6 +1069,272 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         self.common_req(self.data_from_payload)
 
 
+
+class HttpServerContext(object):
+    """Explicit routing, authentication, options and lifecycle for one server.
+
+    Configure/register before run(). Global signal handlers are opt-in because
+    signals belong to the process, not to an individual embedded server.
+    """
+    def __init__(self):
+        self.auth = None
+        self.commands = {}
+        self.named_commands = {}
+        self.regex_commands = {}
+        self.options = DEFAULT_OPTIONS.copy()
+        self.server = None
+        self.killed = False
+        self._running = False
+        self._lifecycle_lock = threading.RLock()
+
+    def register(self, handler,
+                 op,
+                 safe_init     = None,
+                 at_start      = None,
+                 name          = None,
+                 at_stop       = None,
+                 static        = False,
+                 root          = None,
+                 replacement   = None,
+                 charset       = DEFAULT_CHARSET,
+                 content_type  = None,
+                 to_auth       = False,
+                 to_log        = True,
+                 max_body_size = None):
+        """
+        Register a command
+        @handler: function to execute when the command is received
+        @op: http method(s)
+        @safe_init: called by the safe_init() function of this module
+        @at_start: called once just before the server starts
+        @at_stop: called once just before the server stops
+        @name: name of the command (if not name, handler.__name__ is used)
+        @static: render static file
+        @root: root path
+        @replacement: rewrite path when name is regexp
+        @charset: charset
+        @content_type: content_type
+        @to_auth: use basic authentification if True
+        @to_log: log request if True
+        @max_body_size: maximum request body bytes; None inherits this context's limit
+
+        prototypes:
+            handler(args)
+            safe_init(options)
+            at_start(options)
+            at_stop()
+        """
+        ref_cmd = self.named_commands
+        is_reg  = False
+
+        if isinstance(name, RePatternType): # pylint: disable=protected-access
+            key         = name.pattern
+            ref_cmd     = self.regex_commands
+            is_reg      = True
+        elif name:
+            key         = name
+            replacement = None
+        else:
+            key         = handler.__name__
+            name        = handler.__name__
+            replacement = None
+
+        methods = []
+
+        if not isinstance(op, (list, tuple)):
+            op = [op.upper()]
+
+        for x in op:
+            x = x.upper()
+            if x not in _METHODS:
+                raise ValueError("unknown HTTP method: %r" % x)
+
+            if static and x not in ('GET', 'HEAD'):
+                raise ValueError("Static must be GET, HEAD command")
+
+            methods.append(x)
+
+        if not methods:
+            raise ValueError("Missing HTTP method")
+
+        if static and not root:
+            raise ValueError("Missing root argument for static")
+
+        cmd = Command(name,
+                      handler,
+                      methods,
+                      safe_init,
+                      at_start,
+                      at_stop,
+                      static,
+                      root,
+                      replacement,
+                      charset,
+                      content_type,
+                      to_auth,
+                      to_log,
+                      max_body_size)
+
+        for method in methods:
+            if not is_reg:
+                mkey = "%s /%s" % (method, key)
+            else:
+                mkey = "%s %s" % (method, key)
+
+            if mkey in self.commands:
+                raise ValueError("%s is already registred" % name)
+            self.commands[mkey] = cmd
+            ref_cmd[mkey]   = self.commands[mkey]
+
+    def init(self, options, use_sigterm_handler=False):
+        """
+        Must be called just after registration, before anything else
+        """
+        with self._lifecycle_lock:
+            # pylint: disable-msg=W0613
+            if self._running:
+                raise RuntimeError('cannot initialize a running HTTP context')
+
+            self.auth = None
+            self.killed = False
+
+            self.options = DEFAULT_OPTIONS.copy()
+            if isinstance(options, dict):
+                self.options.update(options)
+            else:
+                for optname, optvalue in iteritems(DEFAULT_OPTIONS):
+                    if hasattr(options, optname):
+                        self.options[optname] = getattr(options, optname)
+                    else:
+                        self.options[optname] = optvalue
+
+            if self.options['testmethods']:
+                def fortytwo(request):
+                    "test GET method"
+                    return 42
+                def ping(request):
+                    "test POST method"
+                    return request.payload_params()
+                self.register(fortytwo, 'GET')
+                self.register(ping, 'POST')
+
+            if self.options['auth_basic_file']:
+                self.auth = HttpAuthentication(self.options['auth_basic_file'],
+                                           realm = self.options['auth_basic']).parse_file()
+
+            for name, cmd in iteritems(self.commands):
+                if cmd.safe_init:
+                    LOG.info("safe_init: %r", name)
+                    cmd.safe_init(self.options)
+
+            if use_sigterm_handler:
+                # signal.signal(signal.SIGHUP, lambda *x: None) # XXX
+                signal.signal(signal.SIGTERM, self.sigterm_handler)
+                signal.signal(signal.SIGINT, self.sigterm_handler)
+
+
+    def bind_handler(self, handler=HttpReqHandler):
+        """Bind without mutating a supplied handler class or another context."""
+        class BoundHttpReqHandler(handler):
+            _httpdis_context = self
+            _ALLOWED_CONTENT_TYPES = list(getattr(handler, '_ALLOWED_CONTENT_TYPES', ()))
+        for name in _SERVER_VERSION_OPTIONS:
+            if self.options.get(name) is not None:
+                setattr(BoundHttpReqHandler, name, self.options[name])
+        return BoundHttpReqHandler
+
+    def sigterm_handler(self, signum, stack_frame):
+        return self.stop()
+
+    def stop(self):
+        with self._lifecycle_lock:
+            if self.killed:
+                return
+            self.killed = True
+            server = self.server
+        # Application callbacks may wait for workers. Do not hold the lifecycle
+        # lock while they run; the serving thread must be able to finish.
+        try:
+            for name, cmd in iteritems(self.commands):
+                if cmd.at_stop:
+                    LOG.info("at_stop: %r", name)
+                    cmd.at_stop()
+        finally:
+            if server:
+                try:
+                    server.kill()
+                finally:
+                    server.server_close()
+
+    def run(self, options=None, http_req_handler=HttpReqHandler,
+            http_server_class=KillableThreadingHTTPServer):
+        server = None
+        with self._lifecycle_lock:
+            if self._running:
+                raise RuntimeError('HTTP context is already running')
+            if self.killed:
+                raise RuntimeError('initialize the HTTP context before restarting')
+            self._running = True
+        try:
+            with self._lifecycle_lock:
+                if self.killed:
+                    return
+                server = http_server_class(
+                    self.options,
+                    (self.options['listen_addr'], self.options['listen_port']),
+                    self.bind_handler(http_req_handler), name='httpdis')
+                self.server = server
+                server.httpdis_context = self
+            for name, cmd in iteritems(self.commands):
+                if self.killed:
+                    break
+                if cmd.at_start:
+                    LOG.info("at_start: %r", name)
+                    cmd.at_start(self.options if options is None else options)
+            LOG.info("will now serve")
+            while not self.killed:
+                try:
+                    server.serve_until_killed()
+                except (socket.error, select.error) as why:
+                    if errno.EINTR == why.errno:
+                        LOG.debug("interrupted system call")
+                    elif errno.EBADF == why.errno and self.killed:
+                        LOG.debug("server close")
+                    else:
+                        raise
+        finally:
+            try:
+                if server is not None:
+                    try:
+                        server.kill()
+                    finally:
+                        server.server_close()
+            finally:
+                with self._lifecycle_lock:
+                    self._running = False
+                LOG.info("exiting")
+
+
+def _legacy_property(name):
+    # Retain historical module attributes, including direct reassignment by old
+    # consumers and tests, without making independent contexts use them.
+    return property(lambda self: globals()[name],
+                    lambda self, value: globals().__setitem__(name, value))
+
+
+class _LegacyHttpServerContext(HttpServerContext):
+    auth = _legacy_property('_AUTH')
+    commands = _legacy_property('_COMMANDS')
+    named_commands = _legacy_property('_NCMD')
+    regex_commands = _legacy_property('_RCMD')
+    options = _legacy_property('_OPTIONS')
+    server = _legacy_property('_HTTP_SERVER')
+    killed = _legacy_property('_KILLED')
+
+
+_DEFAULT_CONTEXT = _LegacyHttpServerContext()
+
+
 def register(handler,
              op,
              safe_init     = None,
@@ -1083,192 +1349,26 @@ def register(handler,
              to_auth       = False,
              to_log        = True,
              max_body_size = None):
-    """
-    Register a command
-    @handler: function to execute when the command is received
-    @op: http method(s)
-    @safe_init: called by the safe_init() function of this module
-    @at_start: called once just before the server starts
-    @at_stop: called once just before the server stops
-    @name: name of the command (if not name, handler.__name__ is used)
-    @static: render static file
-    @root: root path
-    @replacement: rewrite path when name is regexp
-    @charset: charset
-    @content_type: content_type
-    @to_auth: use basic authentification if True
-    @to_log: log request if True
-    @max_body_size: maximum request body bytes; None inherits the global limit
+    return _DEFAULT_CONTEXT.register(handler, op, safe_init, at_start, name,
+                                     at_stop, static, root, replacement, charset,
+                                     content_type, to_auth, to_log, max_body_size)
 
-    prototypes:
-        handler(args)
-        safe_init(options)
-        at_start(options)
-        at_stop()
-    """
-    ref_cmd = _NCMD
-    is_reg  = False
-
-    if isinstance(name, RePatternType): # pylint: disable=protected-access
-        key         = name.pattern
-        ref_cmd     = _RCMD
-        is_reg      = True
-    elif name:
-        key         = name
-        replacement = None
-    else:
-        key         = handler.__name__
-        name        = handler.__name__
-        replacement = None
-
-    methods = []
-
-    if not isinstance(op, (list, tuple)):
-        op = [op.upper()]
-
-    for x in op:
-        x = x.upper()
-        if x not in _METHODS:
-            raise ValueError("unknown HTTP method: %r" % x)
-
-        if static and x not in ('GET', 'HEAD'):
-            raise ValueError("Static must be GET, HEAD command")
-
-        methods.append(x)
-
-    if not methods:
-        raise ValueError("Missing HTTP method")
-
-    if static and not root:
-        raise ValueError("Missing root argument for static")
-
-    cmd = Command(name,
-                  handler,
-                  methods,
-                  safe_init,
-                  at_start,
-                  at_stop,
-                  static,
-                  root,
-                  replacement,
-                  charset,
-                  content_type,
-                  to_auth,
-                  to_log,
-                  max_body_size)
-
-    for method in methods:
-        if not is_reg:
-            mkey = "%s /%s" % (method, key)
-        else:
-            mkey = "%s %s" % (method, key)
-
-        if mkey in _COMMANDS:
-            raise ValueError("%s is already registred" % name)
-        _COMMANDS[mkey] = cmd
-        ref_cmd[mkey]   = _COMMANDS[mkey]
 
 def sigterm_handler(signum, stack_frame):
-    """
-    Just tell the server to exit.
+    return _DEFAULT_CONTEXT.sigterm_handler(signum, stack_frame)
 
-    WARNING: There are race conditions, for example with TimeoutSocket.accept.
-    We don't care: the user can just rekill the process after like 1 sec. if
-    the first kill did not work.
-    """
-    # pylint: disable-msg=W0613
-    global _KILLED
-
-    for name, cmd in iteritems(_COMMANDS):
-        if cmd.at_stop:
-            LOG.info("at_stop: %r", name)
-            cmd.at_stop()
-
-    _KILLED = True
-
-    if _HTTP_SERVER:
-        _HTTP_SERVER.kill()
-        _HTTP_SERVER.server_close()
 
 def stop():
-    sigterm_handler(None, None)
+    return _DEFAULT_CONTEXT.stop()
 
-def run(options, http_req_handler = HttpReqHandler, http_server_class = KillableThreadingHTTPServer):
-    """
-    Start and execute the server
-    """
-    # pylint: disable-msg=W0613
-    global _HTTP_SERVER
 
-    for x in ('server_version', 'sys_version'):
-        if _OPTIONS.get(x) is not None:
-            setattr(http_req_handler, x, _OPTIONS[x])
+def run(options, http_req_handler=HttpReqHandler,
+        http_server_class=KillableThreadingHTTPServer):
+    return _DEFAULT_CONTEXT.run(options, http_req_handler, http_server_class)
 
-    _HTTP_SERVER = http_server_class(
-        _OPTIONS,
-        (_OPTIONS['listen_addr'], _OPTIONS['listen_port']),
-        http_req_handler,
-        name = "httpdis")
-
-    for name, cmd in iteritems(_COMMANDS):
-        if cmd.at_start:
-            LOG.info("at_start: %r", name)
-            cmd.at_start(options)
-
-    LOG.info("will now serve")
-    while not _KILLED:
-        try:
-            _HTTP_SERVER.serve_until_killed()
-        except (socket.error, select.error) as why:
-            if errno.EINTR == why.errno:
-                LOG.debug("interrupted system call")
-            elif errno.EBADF == why.errno and _KILLED:
-                LOG.debug("server close")
-            else:
-                raise
-
-    LOG.info("exiting")
 
 def init(options, use_sigterm_handler=True):
-    """
-    Must be called just after registration, before anything else
-    """
-    # pylint: disable-msg=W0613
-    global _AUTH, _OPTIONS, _KILLED
-
-    _AUTH = None
-    _KILLED = False
-
-    if isinstance(options, dict):
-        _OPTIONS = DEFAULT_OPTIONS.copy()
-        _OPTIONS.update(options)
-    else:
-        for optname, optvalue in iteritems(DEFAULT_OPTIONS):
-            if hasattr(options, optname):
-                _OPTIONS[optname] = getattr(options, optname)
-            else:
-                _OPTIONS[optname] = optvalue
-
-    if _OPTIONS['testmethods']:
-        def fortytwo(request):
-            "test GET method"
-            return 42
-        def ping(request):
-            "test POST method"
-            return request.payload_params()
-        register(fortytwo, 'GET')
-        register(ping, 'POST')
-
-    if _OPTIONS['auth_basic_file']:
-        _AUTH = HttpAuthentication(_OPTIONS['auth_basic_file'],
-                                   realm = _OPTIONS['auth_basic']).parse_file()
-
-    for name, cmd in iteritems(_COMMANDS):
-        if cmd.safe_init:
-            LOG.info("safe_init: %r", name)
-            cmd.safe_init(_OPTIONS)
-
+    _DEFAULT_CONTEXT.init(options, use_sigterm_handler=False)
     if use_sigterm_handler:
-        # signal.signal(signal.SIGHUP, lambda *x: None) # XXX
         signal.signal(signal.SIGTERM, sigterm_handler)
         signal.signal(signal.SIGINT, sigterm_handler)

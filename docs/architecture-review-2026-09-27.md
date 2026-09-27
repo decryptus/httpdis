@@ -1,7 +1,8 @@
 # Architecture review — 2026-09-27
 
 Reviewed commit: `962cc6cc42cf55600e5bc4cf7d9fad8d5f29e422` on `master`.
-Status: **review and engineering requirements only; runtime findings remain open**.
+Initial status: **review and engineering requirements only**. See the follow-up
+implementation below for the addressed findings and compatibility scope.
 
 Scope: separation of application logic, interfaces and adapters; callback and
 initialization ownership; fixed validation contracts. Source files were fetched
@@ -42,3 +43,28 @@ commit. Thread-local credentials do not isolate two separately configured server
 This review traced source behavior; it does not claim new socket/concurrency tests
 or a complete security audit. Business services supplied by consumers require
 separate callback-level review.
+
+
+## Follow-up implementation
+
+H1: `HttpServerContext` owns route maps, options, authentication and lifecycle.
+Handlers resolve the bound context, and context startup derives a handler subclass
+without mutating the shared handler class. The default context explicitly adapts
+the historical module globals and function signatures. Global entry points are
+still shared; only explicitly separate contexts provide server isolation.
+
+H2: `httpdis.py` obtains its compatibility defaults from `config.get_default_options()`;
+the duplicate schema is removed and both import paths remain independent copies.
+
+Tests run two real servers concurrently with separate named/regex routes, users,
+realms, body limits and server headers. They verify rejection paths, concurrent
+authentication, changes to legacy globals, stopping one server without affecting
+the other, global startup/shutdown, startup failure cleanup and opt-in context
+signal handlers. Import-blocked tests reject application/CLI dependencies.
+The CI also installs the candidate package and runs pinned DWho, Auton, Covenant
+and Monit Docker suites outside the HTTPdis checkout, in addition to legacy and
+modern Python matrices and distribution checks.
+
+Remaining scope: callback-owned application state is not isolated by HTTPdis;
+routes/configuration are prepared before serving, and existing worker shutdown
+semantics do not cancel application code already executing.
