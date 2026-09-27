@@ -1,0 +1,44 @@
+# Architecture review — 2026-09-27
+
+Reviewed commit: `962cc6cc42cf55600e5bc4cf7d9fad8d5f29e422` on `master`.
+Status: **review and engineering requirements only; runtime findings remain open**.
+
+Scope: separation of application logic, interfaces and adapters; callback and
+initialization ownership; fixed validation contracts. Source files were fetched
+at the pinned commit. This PR does not change runtime code or claim CI enforcement
+of the new requirements. [Pinned source](https://github.com/decryptus/httpdis/tree/962cc6cc42cf55600e5bc4cf7d9fad8d5f29e422).
+
+## Confirmed findings
+
+### H1 — Medium: server state is owned by module globals
+
+`httpdis/httpdis.py` stores routes in `_COMMANDS`, `_NCMD`, `_RCMD`, options in
+`_OPTIONS`, authentication in `_AUTH`, and lifecycle in `_HTTP_SERVER`/`_KILLED`.
+`init`, `register`, `run`, request handlers and `stop` share these values. A second
+initialization changes the options/authentication seen by the same module's
+handlers; routes are not scoped to a server instance. This is an embedding and
+composition limitation, not evidence that the API launches a CLI.
+
+A reusable runtime/router object should own that state, with an explicit lifecycle
+adapter. Acceptance: two servers with different routes/options/authentication
+operate independently, including start/stop and rejected requests. Keep existing
+transport contract tests and decide compatibility for global entry points.
+
+### H2 — Low: the default-options schema is duplicated
+
+`httpdis/config.py:DEFAULT_OPTIONS` and `httpdis/httpdis.py:DEFAULT_OPTIONS` define
+the same keys separately. Centralize the schema and keep compatibility exports
+where current consumers require them. Verify both access paths give independent
+mutable option dictionaries without diverging defaults.
+
+## Positive evidence and limits
+
+HTTPdis is itself an HTTP transport; request classes, headers, status codes and
+route matching are legitimate here. No CLI, argparse or curses import was found
+in the five package Python files. Its handlers call registered functions directly.
+Authentication credentials use `threading.local()` and are cleared for each
+validation; the older shared-user race is not asserted against this reviewed
+commit. Thread-local credentials do not isolate two separately configured servers.
+This review traced source behavior; it does not claim new socket/concurrency tests
+or a complete security audit. Business services supplied by consumers require
+separate callback-level review.
