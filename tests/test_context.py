@@ -1,10 +1,12 @@
 """Independent real servers plus the historical module facade."""
 import base64
+import errno
 import hashlib
 import json
 import os
 import re
 import shutil
+import socket
 import tempfile
 import threading
 import unittest
@@ -226,7 +228,9 @@ class ContextTests(unittest.TestCase):
             context.run()
         self.assertFalse(context._running)
         self.assertTrue(context.server.killed())
-        self.assertEqual(context.server.socket.fileno(), -1)
+        with self.assertRaises(socket.error) as caught:
+            context.server.socket.getsockname()
+        self.assertEqual(caught.exception.errno, errno.EBADF)
         context.init({})
 
     def test_stop_hook_failure_still_closes_server(self):
