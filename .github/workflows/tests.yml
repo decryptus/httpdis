@@ -92,6 +92,7 @@ jobs:
       - name: Test the installed package outside the checkout
         run: |
           cd "$(mktemp -d)"
+          python "$GITHUB_WORKSPACE/.github/scripts/check-test-collection.py" --runner unittest "$GITHUB_WORKSPACE/tests"
           python -m unittest discover -s "$GITHUB_WORKSPACE/tests" -v
   legacy:
     runs-on: ubuntu-latest
