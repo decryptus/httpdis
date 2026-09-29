@@ -196,3 +196,82 @@ The default schema is defined once in `httpdis.config`. Both historical
 `DEFAULT_OPTIONS` import paths remain independent dictionaries with the same
 initial values; `get_default_options()` returns a fresh dictionary. Mutating an
 export is not a way to reconfigure an already initialized context.
+
+
+## Application-owned authentication providers (development)
+
+The embedding daemon may supply `auth_provider` when initializing a server context.
+This is an additive extension, not a new default authentication backend. HTTPdis
+neither chooses credential storage nor opens a database for this interface.
+
+```python
+from httpdis.authentication import AuthenticationProvider, Identity
+from httpdis.ext.httpdis_json import HttpServerContext
+
+class DaemonProvider(AuthenticationProvider):
+    challenge = 'Bearer'
+
+    def __init__(self, credential_service):
+        self.credentials = credential_service
+
+    def authenticate(self, request):
+        # The supplied service verifies expiry/revocation and returns an account.
+        account = self.credentials.verify(request.header('authorization'))
+        if account is None:
+            return None
+        return Identity(account.name, 'token', account.scopes)
+
+context = HttpServerContext()
+# credential_service is constructed/configured by the embedding application.
+# context.init({'auth_provider': DaemonProvider(credential_service), ...})
+```
+
+Use the same `auth_provider` option on the existing options object or module-level
+`init()` facade when needed. Independent daemons must use independent
+`HttpServerContext` instances; the historical module facade remains a singleton.
+DWho/application configuration should construct a provider explicitly and pass the
+instance. No dynamic backend import, YAML syntax, credential path or default store
+is introduced by HTTPdis here.
+
+A provider implements `authenticate(AuthenticationRequest)` and returns an
+immutable `Identity(principal, method, scopes)`. It may return `None` or raise
+`AuthenticationDenied` for invalid/missing/expired/revoked credentials. Backend
+failure, including `AuthenticationUnavailable`, produces a generic HTTP 503;
+exception details are not exposed or logged by the adapter. There is no fallback
+to Basic or anonymous access after provider failure. A fixed optional `challenge`
+sets WWW-Authenticate on HTTP 401. Route user allowlists still apply (HTTP 403).
+
+The request contains the method, parsed path without query parameters, selected
+security headers as immutable pairs, and the direct socket peer address. Header
+lookup is case-insensitive; duplicate security headers are rejected. Forwarded
+identity headers are never trusted or passed through this contract. No HTTP
+handler, request body or mutable server context is passed to the provider. Do not
+log header values: they contain credentials and cookies. The request repr is redacted.
+
+Successful requests expose `HTTP_AUTH_USER` for existing applications and
+`HTTP_AUTH_IDENTITY` for the verified method/scopes. They never expose a password.
+**Scopes are data, not automatic authorization:** applications must enforce them
+alongside endpoint/owner/maintenance permissions before accepting scoped tokens.
+Authentication applies only to routes registered with `to_auth`; this extension
+does not silently make public routes private.
+
+Providers and their storage adapters must support concurrent calls. Their lifecycle,
+configuration, defaults, persistence, revocation and shutdown belong to the daemon.
+Two contexts may use distinct provider instances and stores without sharing state.
+Sharing a provider is an explicit application decision. HTTPdis does not cache
+provider identities or take ownership of the supplied backend.
+
+### Compatibility and remaining work
+
+Without `auth_provider`, Basic, `auth_basic_file`, `auth_basic`, route allowlists
+and the historical API keep their behavior. Configuring both a provider and
+`auth_basic_file` is rejected rather than establishing an implicit fallback.
+The new contract uses syntax supported by the existing Python compatibility matrix
+and adds no required dependency.
+
+This provider interface does **not** yet implement password login, Argon2id,
+TOTP enrollment/replay protection, session/token storage, rate limiting or login
+HTTP routes. It does not configure cookies, HTTPS, CSRF or CORS automatically.
+Browser sessions must not be exposed until those transport controls and the backend
+are implemented and tested together. Existing HTTPdis CORS/OPTIONS behavior is
+unchanged by this compatibility-preserving addition.

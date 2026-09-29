@@ -67,7 +67,7 @@ jobs:
           installed = pathlib.Path(httpdis.__file__).resolve().parent
           candidate = pathlib.Path(sys.argv[1]) / 'httpdis'
           assert installed != candidate.resolve()
-          for relative in ('httpdis.py', 'config.py', 'ext/httpdis_json.py'):
+          for relative in ('httpdis.py', 'config.py', 'authentication.py', 'ext/httpdis_json.py'):
               assert (installed / relative).read_bytes() == (candidate / relative).read_bytes(), relative
           PY
           python -m unittest discover -s "$GITHUB_WORKSPACE/consumers/dwho/tests" -v
