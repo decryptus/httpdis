@@ -1,3 +1,12 @@
+python-httpdis (0.6.30) unstable; urgency=medium
+
+  * Add explicit authentication providers and immutable request identities.
+  * Add Argon2 accounts, expiring sessions and scoped revocable bearer tokens.
+  * Persist authentication through SQLite and strict Sonicprobe AnySQL transactions.
+  * Keep legacy Basic authentication and caller-owned storage configuration.
+
+ -- Codex <codex@openai.com>  Tue, 29 Sep 2026 10:25:00 +0200
+
 python-httpdis (0.6.29) unstable; urgency=medium
 
   * Add isolated HTTP/JSON server contexts for routes, authentication and lifecycle.
