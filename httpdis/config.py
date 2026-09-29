@@ -9,6 +9,7 @@ DEFAULT_CHARSET  = 'utf-8'
 
 DEFAULT_OPTIONS  = {'auth_basic':      None,
                     'auth_basic_file': None,
+                    'auth_provider':   None,
                     'testmethods':     False,
                     'max_body_size':   1 * 1024 * 1024,
                     'max_workers':     1,

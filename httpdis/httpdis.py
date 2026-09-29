@@ -62,6 +62,9 @@ from six.moves.urllib import parse as urlparse, request as urlrequest
 from six.moves.BaseHTTPServer import BaseHTTPRequestHandler
 
 import magic
+from httpdis.authentication import (Identity, AuthenticationRequest,
+                                    AuthenticationDenied, AuthenticationUnavailable,
+                                    AUTH_HEADER_NAMES)
 
 from sonicprobe import helpers
 from sonicprobe.libs import urisup
@@ -770,9 +773,14 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             raise self.req_error(400, str(e))
 
     def authenticate(self, auth_users = None):
-        auth_context = self.get_context().auth
-        for x in ('HTTP_AUTH_USER', 'HTTP_AUTH_PASSWD'):
+        context = self.get_context()
+        auth_context = context.auth
+        for x in ('HTTP_AUTH_USER', 'HTTP_AUTH_PASSWD', 'HTTP_AUTH_IDENTITY'):
             self._SERVER.pop(x, None)
+
+        if context.auth_provider is not None:
+            self._authenticate_provider(context.auth_provider, auth_users)
+            return
 
         if not auth_context:
             raise self.req_error(401, 'Authentication is not configured')
@@ -794,6 +802,32 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
         if not allowed:
             raise auth_context.unauthorized()
+
+    def _authenticate_provider(self, provider, auth_users):
+        headers = tuple((key.lower(), value) for key, value in self.headers.items()
+                        if key.lower() in AUTH_HEADER_NAMES)
+        request = AuthenticationRequest(self.command, self._path, headers, self.client_address[0])
+        challenge = self.get_context().auth_challenge
+        response_headers = {'WWW-Authenticate': challenge} if challenge else {}
+        try:
+            # Reject ambiguous security headers before delegating to a provider.
+            for name in AUTH_HEADER_NAMES:
+                request.header(name)
+            identity = provider.authenticate(request)
+            if identity is None:
+                raise AuthenticationDenied()
+            if not isinstance(identity, Identity):
+                raise AuthenticationUnavailable()
+        except AuthenticationDenied:
+            raise self.req_error(401, 'Authentication required', headers=response_headers)
+        except Exception:
+            # Backend exception text may contain credentials or connection secrets.
+            LOG.error('Authentication provider failed')
+            raise self.req_error(503, 'Authentication unavailable')
+        if auth_users and identity.principal not in auth_users:
+            raise self.req_error(403, 'Access denied')
+        self._SERVER['HTTP_AUTH_USER'] = identity.principal
+        self._SERVER['HTTP_AUTH_IDENTITY'] = identity
 
     def set_cookie(self, name, value = '', expires = 0, path = '/', domain = '', secure = False, http_only = False):
         cook                   = http_cookies.SimpleCookie()
@@ -1078,6 +1112,8 @@ class HttpServerContext(object):
     """
     def __init__(self):
         self.auth = None
+        self.auth_provider = None
+        self.auth_challenge = None
         self.commands = {}
         self.named_commands = {}
         self.regex_commands = {}
@@ -1196,6 +1232,8 @@ class HttpServerContext(object):
                 raise RuntimeError('cannot initialize a running HTTP context')
 
             self.auth = None
+            self.auth_provider = None
+            self.auth_challenge = None
             self.killed = False
 
             self.options = DEFAULT_OPTIONS.copy()
@@ -1207,6 +1245,20 @@ class HttpServerContext(object):
                         self.options[optname] = getattr(options, optname)
                     else:
                         self.options[optname] = optvalue
+
+            provider = self.options['auth_provider']
+            challenge = getattr(provider, 'challenge', None)
+            if provider is not None:
+                if not callable(getattr(provider, 'authenticate', None)):
+                    raise ValueError('auth_provider must implement authenticate(request)')
+                if self.options['auth_basic_file']:
+                    raise ValueError('auth_provider and auth_basic_file are mutually exclusive')
+                if challenge is not None and (not isinstance(challenge, (str, type(u'')))
+                        or not challenge or len(challenge) > 1024
+                        or any(ord(char) < 32 or ord(char) > 126 for char in challenge)):
+                    raise ValueError('invalid authentication challenge')
+            self.auth_provider = provider
+            self.auth_challenge = challenge
 
             if self.options['testmethods']:
                 def fortytwo(request):
