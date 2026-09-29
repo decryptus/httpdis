@@ -371,9 +371,49 @@ workers. HTTPdis does not open or close a caller-owned store.
 
 `MemoryAuthStore` is an explicitly chosen single-process adapter for development
 and tests. Its data is lost on restart, including accounts, tokens and rate limits;
-it provides **no restart durability or multi-process coordination**. No durable
-adapter is supplied yet. The record format is a development contract pending the
-first durable implementation, not a promise of stable database schema migrations.
+it provides **no restart durability or multi-process coordination**.
+
+### Durable SQLite authentication
+
+Install `httpdis[auth]` (Sonicprobe >= 0.3.55) to use the existing AnySQL SQLite
+adapter with automatic reconnect disabled. The embedding daemon chooses the
+filename, creates its private parent directory, and owns the store lifecycle:
+
+```python
+from httpdis.auth_sqlite import SQLiteAuthStore
+from httpdis.auth_backend import LocalAuthService, Argon2Passwords
+
+store = SQLiteAuthStore('/var/lib/my-daemon/auth/auth.db', timeout=5)
+try:
+    service = LocalAuthService(store, Argon2Passwords())
+    # Supply service to your provider and trusted administration interface.
+    # Stop request workers before closing the store.
+finally:
+    store.close()
+```
+
+There is no default filename and no automatic account creation. Existing Basic
+and provider configurations are unaffected. The database must be a local regular
+file, owned by the daemon user with no group/other permissions (created 0600).
+The parent must be owned by that user and not writable by group/others; keep the
+path and its ancestors under trusted administration. Symlinks, hard links and
+replacement of an open store's file are rejected. Use a dedicated authentication
+database, independent of job history. Network filesystems are not supported.
+
+Each transaction opens its own AnySQL connection in the calling thread, takes
+`BEGIN IMMEDIATE`, commits on success, and closes on every exit (rolling back
+uncommitted work). `synchronous=FULL`, the DELETE journal and secure deletion are
+selected explicitly. Lock waits are bounded by `timeout` (0 < seconds <= 30).
+Multiple threads/processes can use the same database; create one store per process
+after forking. Failures are surfaced without reconnect/replay or memory fallback.
+
+Accounts, sessions, token revocations and rate-limit counters survive restart.
+Passwords remain hashes; session/token/CSRF secrets are not stored in plaintext.
+This is not encryption at rest: protect the database and backups as credentials.
+Stop all writers before copying the database for backup. Only schema version 1
+is accepted; incompatible databases are refused, never silently reset. JSON
+records are bounded to 64 KiB and support the existing four namespaces. Redis
+and automatic schema migrations are not supplied by this adapter.
 
 **Browser integration is still pending:** this backend does not expose login/logout
 routes, set cookies, configure HTTPS/CORS, enforce request Origin or provide TOTP.
