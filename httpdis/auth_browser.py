@@ -15,7 +15,7 @@ SAFE_METHODS = frozenset(('GET', 'HEAD'))
 MAX_COOKIE_BYTES = 8192
 COOKIE_PREFIX_PATTERN = re.compile(r'^[a-z][a-z0-9-]{0,39}$')
 OPAQUE_PATTERN = re.compile(r'^[A-Za-z0-9_-]{43}$')
-ORIGIN_AUTHORITY_PATTERN = re.compile(r'^[A-Za-z0-9.\-:\[\]]+$')
+ORIGIN_AUTHORITY_PATTERN = re.compile(r'^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.\-]+)(?::([0-9]{1,5}))?$')
 LOOPBACK_HOSTS = frozenset(('127.0.0.1', '::1'))
 
 
@@ -32,7 +32,10 @@ def browser_origin(value):
                 or not ORIGIN_AUTHORITY_PATTERN.match(parsed.netloc)
                 or parsed.netloc.endswith(':')):
             raise ValueError()
-        port = parsed.port
+        # Python 2.7/3.5 can turn an out-of-range .port into None. Validate the
+        # literal authority ourselves so supported interpreters agree.
+        authority_match = ORIGIN_AUTHORITY_PATTERN.match(parsed.netloc)
+        port = int(authority_match.group(2)) if authority_match.group(2) is not None else None
         if port is not None and not 1 <= port <= 65535:
             raise ValueError()
         if parsed.scheme == 'http' and parsed.hostname not in LOOPBACK_HOSTS:
