@@ -269,9 +269,115 @@ and the historical API keep their behavior. Configuring both a provider and
 The new contract uses syntax supported by the existing Python compatibility matrix
 and adds no required dependency.
 
-This provider interface does **not** yet implement password login, Argon2id,
-TOTP enrollment/replay protection, session/token storage, rate limiting or login
-HTTP routes. It does not configure cookies, HTTPS, CSRF or CORS automatically.
+The provider contract alone does not supply accounts or credential verification;
+the optional local service described below supplies those separately. Browser login
+HTTP routes and TOTP enrollment/replay protection remain pending. The contract does
+not configure cookies, HTTPS, CSRF or CORS automatically.
 Browser sessions must not be exposed until those transport controls and the backend
 are implemented and tested together. Existing HTTPdis CORS/OPTIONS behavior is
 unchanged by this compatibility-preserving addition.
+
+## Local authentication backend (development, optional)
+
+`httpdis.auth_backend.LocalAuthService` supplies local account, opaque session and
+opaque API token behavior behind the provider contract. **The daemon must supply
+both a store and a password adapter.** No file path, database, credentials, accounts
+or HTTP login routes are created by importing HTTPdis.
+
+```python
+from httpdis.auth_backend import LocalAuthService, Argon2Passwords, BearerAuthProvider
+
+# store is selected and constructed by the application, not HTTPdis.
+# auth = LocalAuthService(store=store, passwords=Argon2Passwords(), audit=audit)
+# context.init({'auth_provider': BearerAuthProvider(auth), ...})
+```
+
+Install `httpdis[auth]` on Python 3.10+ to use the optional maintained
+`argon2-cffi` adapter. It creates Argon2id password hashes. The core/provider
+contract and injected service remain compatible with the legacy interpreter
+matrix, without installing that optional dependency there. No weak password
+implementation is supplied as a fallback. The password adapter contract is
+`hash(password) -> encoded_hash` and `verify(encoded_hash, password) -> bool`;
+backend/configuration errors must raise, not return a successful identity.
+
+### Administration and account changes
+
+`provision(principal, password, scopes)` creates or replaces an account. Replacing
+an account rotates its revision and invalidates all existing sessions/tokens.
+`disable(principal)` disables login and invalidates existing credentials.
+`issue_token(principal, scopes, ttl)` requires a scope subset of the enabled
+account, an explicit TTL no longer than 30 days, and returns a one-time secret plus
+a credential ID for `revoke_token(credential_id)`. These are **trusted administrative
+service methods**, not unauthenticated user operations. The embedding application
+must authorize any management interface it builds around them.
+
+The service validates identity/scope structure using the provider contract. It
+never interprets Auton endpoint names or maintenance permissions. Consumers must
+apply the verified scopes to business operations. Newly provisioned passwords
+must have at least 12 characters and no more than 1,024 UTF-8 bytes; no password
+normalization or silent truncation is performed. Applications may impose stronger
+password/enrollment policies before provisioning. Updating Argon2 parameters can
+be handled by explicit credential rotation; automatic rehash migration is not
+implemented in this first adapter.
+
+### Sessions, tokens and bounded work
+
+`login(principal, password, peer)` returns a session grant with its secret, CSRF
+secret, expiry and identity. `authenticate_session(secret, csrf, mutation=True)`
+checks the CSRF secret before refreshing idle expiry. Session absolute expiry is
+8 hours and idle expiry 30 minutes by default, configurable downward at service
+construction. Every request checks the enabled account and its revision.
+`logout(secret)` revokes that session. Rotation/revocation does not undo work
+already authorized or cancel application jobs.
+
+Secrets use 32 bytes of OS randomness. Only SHA-256 digests of session/token/CSRF
+secrets are stored; account passwords use the injected password hasher. Raw secrets
+are returned to the caller for delivery, never logged by the service. Grant reprs
+are redacted. `BearerAuthProvider` accepts only explicit Authorization Bearer
+credentials and checks the token on every protected request; there is no Basic
+fallback or implicit cookie/session acceptance.
+
+Login work is bounded to two concurrent password verifications per service instance.
+A transactional 60-second fixed window allows 5 attempts per account, 20 per direct
+peer, and 100 globally per store. Successful attempts count too. Unknown accounts
+still perform dummy password verification after admission. Applications should
+also limit login traffic at their trusted ingress; this bounded local policy can
+reject legitimate logins during a distributed attack. Supply the actual socket
+peer or a separately validated trusted-proxy result, never a raw user-controlled
+forwarded header. Each table is capped at 4,096 records by default (configurable
+downward). Expired entries are cleaned opportunistically; active credentials are
+not evicted merely to make room. Capacity exhaustion fails closed.
+
+An optional audit callback receives fixed event names and, where known, the
+principal, never passwords, hashes, tokens, headers or private backend errors.
+Events cover account updates/disable, login success/denial/throttling, token issue/
+revocation/denial and session revocation/denial. Routine successful credential
+checks do not generate audit writes. Audit sink errors are logged generically and
+do not alter authentication outcomes; a deployment requiring transactional audit
+must provide a stronger integration rather than assuming this callback is durable.
+
+### Store contract and deployment limits
+
+The store supplies `transaction()` yielding an adapter with `get(table, key)`,
+`put(table, key, value)`, `delete(table, key)` and `items(table)`. Values are detached
+copies. Transactions serialize the whole block and roll back on exceptions;
+`items` returns a stable snapshot, and deleting a missing key is harmless. The
+namespaces are `accounts`, `sessions`, `tokens`, `attempts`. Records include account
+revision, scopes and Unix expiry timestamps; use a trusted clock consistent across
+workers. Sharing a store between service instances is an explicit choice and also
+shares rate-limit counters. Durable adapters must preserve atomicity across
+processes, protect stored password hashes and make account changes visible to all
+workers. HTTPdis does not open or close a caller-owned store.
+
+`MemoryAuthStore` is an explicitly chosen single-process adapter for development
+and tests. Its data is lost on restart, including accounts, tokens and rate limits;
+it provides **no restart durability or multi-process coordination**. No durable
+adapter is supplied yet. The record format is a development contract pending the
+first durable implementation, not a promise of stable database schema migrations.
+
+**Browser integration is still pending:** this backend does not expose login/logout
+routes, set cookies, configure HTTPS/CORS, enforce request Origin or provide TOTP.
+The caller must mark every cookie-authenticated mutation for CSRF validation; do
+not expose a cookie provider without the complete browser transport protections.
+Only the token-only provider is supplied in this step. Session/login APIs are
+neutral services ready for the subsequent transport integration.
