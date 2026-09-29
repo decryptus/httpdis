@@ -67,7 +67,7 @@ jobs:
           installed = pathlib.Path(httpdis.__file__).resolve().parent
           candidate = pathlib.Path(sys.argv[1]) / 'httpdis'
           assert installed != candidate.resolve()
-          for relative in ('httpdis.py', 'config.py', 'authentication.py', 'ext/httpdis_json.py'):
+          for relative in ('httpdis.py', 'config.py', 'authentication.py', 'auth_backend.py', 'ext/httpdis_json.py'):
               assert (installed / relative).read_bytes() == (candidate / relative).read_bytes(), relative
           PY
           python -m unittest discover -s "$GITHUB_WORKSPACE/consumers/dwho/tests" -v
@@ -88,8 +88,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install . "sonicprobe==0.3.52" "dwho==0.3.61" mock
+      - run: python -m pip install '.[auth]' "sonicprobe==0.3.52" "dwho==0.3.61" mock
       - name: Test the installed package outside the checkout
+        env:
+          HTTPDIS_REQUIRE_ARGON2: '1'
         run: |
           cd "$(mktemp -d)"
           python "$GITHUB_WORKSPACE/.github/scripts/check-test-collection.py" --runner unittest "$GITHUB_WORKSPACE/tests"
