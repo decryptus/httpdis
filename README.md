@@ -415,9 +415,42 @@ is accepted; incompatible databases are refused, never silently reset. JSON
 records are bounded to 64 KiB and support the existing four namespaces. Redis
 and automatic schema migrations are not supplied by this adapter.
 
-**Browser integration is still pending:** this backend does not expose login/logout
-routes, set cookies, configure HTTPS/CORS, enforce request Origin or provide TOTP.
-The caller must mark every cookie-authenticated mutation for CSRF validation; do
-not expose a cookie provider without the complete browser transport protections.
-Only the token-only provider is supplied in this step. Session/login APIs are
-neutral services ready for the subsequent transport integration.
+### Browser session transport
+
+`httpdis.auth_browser.BrowserAuthProvider(service, origin, cookie_prefix='httpdis')`
+adds an opt-in cookie adapter over the same `LocalAuthService`. The daemon supplies
+the service, backend, public origin and lifecycle; HTTPdis installs no routes.
+`BearerAuthProvider` remains token-only and legacy Basic behavior is unchanged.
+
+The provider's `login(AuthenticationRequest, principal, password)` returns the
+existing redacted session grant. Send `provider.cookie(grant.secret, max_age)` as
+`Set-Cookie`, and return only the CSRF value and identity to browser JavaScript.
+Do not return the session secret in JSON or store it in browser JavaScript storage.
+Use `provider.logout(request)` before sending `provider.expired_cookie()`.
+Login rotates any previous cookie session, and logout requires the current CSRF.
+The service already enforces password hashing, login limits, idle/absolute expiry,
+account revision, disable and persistent revocation.
+
+HTTPS cookies use `__Host-<prefix>-session`, `Secure`, `HttpOnly`, `SameSite=Strict`,
+`Path=/`, a bounded `Max-Age`, and no Domain attribute. HTTP is accepted only for
+literal `127.0.0.1` / `::1` development origins, with an unprefixed non-Secure cookie.
+The configured origin must have no path; standard ports are canonicalized.
+Use a dedicated origin: unrelated applications on the same origin share browser
+security boundaries. Behind TLS termination, configure the external HTTPS origin,
+preserve Host, and keep direct backend access private. Forwarded headers are never
+trusted to choose the origin or weaken cookie policy.
+
+Cookie reads require the configured Host and reject foreign Origin/fetch metadata.
+Every cookie mutation requires exact Origin, JSON Content-Type and X-CSRF-Token.
+Login requires the same Origin/JSON checks even before a session exists. Duplicate
+security headers/cookies and mixed Bearer/session credentials are rejected. Explicit
+Bearer clients without browser metadata continue to work without cookies or Origin.
+
+Embedding requirements: serve only fixed public login/assets routes; protect all
+business routes; bound login request bodies; prohibit CORS/preflight in browser
+mode; apply no-store, CSP, frame denial and nosniff headers to errors as well as
+successes; never log credentials, payloads or cookies. `require_browser` is exposed
+for checking public routes before parsing their body. HTTPdis's historical generic
+OPTIONS behavior is unchanged: override it in the embedding browser handler.
+Application scopes, ownership and action confirmation remain application policy.
+This adapter supplies no HTML UI, proxy configuration, TOTP or SSO.
