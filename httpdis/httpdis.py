@@ -62,7 +62,7 @@ from six.moves.urllib import parse as urlparse, request as urlrequest
 from six.moves.BaseHTTPServer import BaseHTTPRequestHandler
 
 import magic
-from httpdis.authentication import (Identity, AuthenticationRequest,
+from .authentication import (Identity, AuthenticationRequest,
                                     AuthenticationDenied, AuthenticationUnavailable,
                                     AUTH_HEADER_NAMES)
 
