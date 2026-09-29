@@ -280,7 +280,7 @@ class LocalAuthService(object):
             account = tx.get('accounts', record['principal'])
             if not account or not account['enabled'] or account['revision'] != record['revision']:
                 raise AuthenticationDenied()
-            if mutation and not hmac.compare_digest(record['csrf'], _digest(csrf)):
+            if mutation and not hmac.compare_digest(record['csrf'].encode('ascii'), _digest(csrf).encode('ascii')):
                 raise AuthenticationDenied()
             if table == 'sessions':
                 record['idle'] = min(now + self.idle_ttl, record['expires'])
