@@ -190,7 +190,10 @@ Routes, authentication, response formats, route/global body-limit fallback and
 lifecycle callback arguments remain compatible. Handler classes are now bound
 through a subclass rather than modified in place. Repeated `stop()` calls no
 longer repeat shutdown hooks. Startup/serving failures close the created socket,
-and shutdown-hook failures still trigger transport cleanup.
+and shutdown-hook failures do not skip subsequent hooks or transport cleanup.
+Shutdown attempts every registered cleanup and re-raises the first failure with
+its traceback, even if later hooks or transport cleanup also fail. Reentrant
+and repeated `stop()` calls do not run the hooks again.
 
 The default schema is defined once in `httpdis.config`. Both historical
 `DEFAULT_OPTIONS` import paths remain independent dictionaries with the same
@@ -454,3 +457,4 @@ for checking public routes before parsing their body. HTTPdis's historical gener
 OPTIONS behavior is unchanged: override it in the embedding browser handler.
 Application scopes, ownership and action confirmation remain application policy.
 This adapter supplies no HTML UI, proxy configuration, TOTP or SSO.
+
