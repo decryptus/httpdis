@@ -51,7 +51,7 @@ Routes and options are process-global; use a separate process for independent ap
 
 ## Request error contract
 
-The development branch distinguishes invalid request syntax, unsupported media,
+Since HTTPdis 0.6.33, the dispatcher distinguishes invalid request syntax, unsupported media,
 missing routes and unsupported methods:
 
 | Request | Response |
