@@ -49,6 +49,34 @@ Handlers receive a request with `get_path()`, `query_params()`, `payload_params(
 lists, compiled regular expressions and `safe_init`, `at_start`, `at_stop` hooks.
 Routes and options are process-global; use a separate process for independent apps.
 
+## Request error contract
+
+Since HTTPdis 0.6.33, the dispatcher distinguishes invalid request syntax, unsupported media,
+missing routes and unsupported methods:
+
+| Request | Response |
+| --- | --- |
+| Malformed JSON or invalid text encoding for a supported payload | 400, `Invalid request body` |
+| Unsupported `Content-Type`, including disabled multipart | 415, `Unsupported Content-Type` |
+| Path with no matching named or regex route | 404 |
+| Recognized HTTP method with a matching path registered for other methods | 405 with `Allow` |
+
+`Allow` lists the explicitly registered methods for the matching path in sorted
+order. It does not invent HEAD or OPTIONS support. Method rejection does not read
+the body or invoke a handler. Completely unsupported HTTP verbs remain the base
+server's responsibility. These corrections change the previous 415 (malformed
+payload), 501 (unsupported media) and 404 (known path, wrong method) responses;
+clients should not depend on those old status mappings.
+
+Payload-parser exceptions use a constant error message instead of reflecting
+exception text or request body values. The JSON handler retains JSON errors.
+This does not sanitize application-owned error messages or custom logging.
+
+A registered route with `to_auth` enabled authenticates before body reading and
+parsing. Routing and header/body-size checks may run before authentication;
+unknown routes and wrong methods do not inherit another method's auth policy.
+Applications still own operation-level authorization. Public routes are unchanged.
+
 ## Request body limits
 
 Since HTTPdis 0.6.28, `register(..., max_body_size=...)` sets the body limit

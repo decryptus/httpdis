@@ -868,6 +868,22 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
         return repr(data)
 
+    def _missing_command(self, cmd):
+        """Distinguish an unknown path from an unsupported registered method."""
+        context = self.get_context()
+        allowed = set()
+        for key in context.named_commands:
+            method, path = key.split(' ', 1)
+            if path == '/' + cmd:
+                allowed.add(method)
+        for key, command in context.regex_commands.items():
+            if command.name.match(cmd):
+                allowed.add(key.split(' ', 1)[0])
+        if allowed:
+            return self.req_error(405, 'Method not allowed',
+                                  headers={'Allow': ', '.join(sorted(allowed))})
+        return self.req_error(404)
+
     def data_from_query(self, cmd):
         """
         Callback for .execute_command() for DELETE/GET/HEAD requests
@@ -894,7 +910,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
         try:
             if not self._cmd:
-                raise self.req_error(404)
+                raise self._missing_command(cmd)
 
             charset = self._cmd.charset or DEFAULT_CHARSET
 
@@ -945,7 +961,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
         try:
             if not self._cmd:
-                raise self.req_error(404)
+                raise self._missing_command(cmd)
 
             charset  = self._cmd.charset or DEFAULT_CHARSET
 
@@ -958,7 +974,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                 ctype = ctype.lower().split(';', 1)[0]
                 if ctype == 'multipart/form-data':
                     if not self._ALLOWED_MULTIPART_FORM:
-                        raise self.req_error(501, "Not supported; Content-Type: %s" % ctype)
+                        raise self.req_error(415, "Unsupported Content-Type")
                     multipart = True
                 elif self._ALLOWED_CONTENT_TYPES:
                     ct_found = False
@@ -967,7 +983,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                             ct_found = True
                             break
                     if not ct_found:
-                        raise self.req_error(501, "Not supported; Content-Type: %s" % ctype)
+                        raise self.req_error(415, "Unsupported Content-Type")
 
             try:
                 clen = int(self.headers.get('Content-Length') or 0)
@@ -998,8 +1014,8 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                         self._payload_params = cgi.FieldStorage(environ = {'REQUEST_METHOD': 'POST'},
                                                                 fp      = self._payload,
                                                                 headers = self.headers)
-                    except Exception as e:
-                        raise self.req_error(415, text=str(e))
+                    except Exception:
+                        raise self.req_error(400, "Invalid request body")
                 else:
                     try:
                         if ctype == 'application/x-www-form-urlencoded':
@@ -1007,8 +1023,8 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                                                                                   encoding = charset))
                         else:
                             self._payload_params = self.parse_payload(payload, charset)
-                    except ValueError as e:
-                        raise self.req_error(415, text=str(e))
+                    except ValueError:
+                        raise self.req_error(400, "Invalid request body")
 
             res = self._cmd.handler(self)
 

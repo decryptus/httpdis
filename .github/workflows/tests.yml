@@ -47,7 +47,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: decryptus/monit-docker
-          ref: 001157a163054ede47637a32c8dd74a8cdd525a6
+          ref: 2e1908b3da8cf352fcbe2346f575651f0fcff6ed
           path: consumers/monit-docker
           persist-credentials: false
       - name: Install candidate HTTPdis with pinned consumer sources
@@ -70,9 +70,13 @@ jobs:
           for relative in ('httpdis.py', 'config.py', 'authentication.py', 'auth_backend.py', 'auth_sqlite.py', 'auth_browser.py', 'ext/httpdis_json.py'):
               assert (installed / relative).read_bytes() == (candidate / relative).read_bytes(), relative
           PY
+          python "$GITHUB_WORKSPACE/.github/scripts/check-test-collection.py" --runner unittest "$GITHUB_WORKSPACE/consumers/dwho/tests"
           python -m unittest discover -s "$GITHUB_WORKSPACE/consumers/dwho/tests" -v
+          python "$GITHUB_WORKSPACE/.github/scripts/check-test-collection.py" --runner unittest "$GITHUB_WORKSPACE/consumers/auton/tests"
           python -m unittest discover -s "$GITHUB_WORKSPACE/consumers/auton/tests" -v
+          python "$GITHUB_WORKSPACE/.github/scripts/check-test-collection.py" --runner unittest "$GITHUB_WORKSPACE/consumers/covenant/tests"
           python -m unittest discover -s "$GITHUB_WORKSPACE/consumers/covenant/tests" -v
+          python "$GITHUB_WORKSPACE/.github/scripts/check-test-collection.py" --runner unittest "$GITHUB_WORKSPACE/consumers/monit-docker/tests"
           python -m unittest discover -s "$GITHUB_WORKSPACE/consumers/monit-docker/tests" -v
   modern:
     runs-on: ubuntu-latest

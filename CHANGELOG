@@ -1,3 +1,12 @@
+python-httpdis (0.6.33) unstable; urgency=medium
+
+  * Return sanitized 400 errors for malformed supported request bodies.
+  * Use 415 for unsupported media and 405 with Allow for known route methods.
+  * Preserve unknown-route 404 responses and authentication before body parsing.
+  * Cover named/regex dispatch and refresh stable consumer compatibility.
+
+ -- Adrien Delle Cave <pypi@doowan.net>  Sat, 03 Oct 2026 00:43:11 +0200
+
 python-httpdis (0.6.32) unstable; urgency=medium
 
   * Finish all shutdown hooks and transport cleanup after a cleanup failure.
