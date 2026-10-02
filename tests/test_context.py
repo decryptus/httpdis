@@ -246,6 +246,54 @@ class ContextTests(unittest.TestCase):
         self.assertEqual(server.kill.call_count, 1)
         self.assertEqual(server.server_close.call_count, 1)
 
+    def test_stop_runs_all_cleanup_and_preserves_first_failure(self):
+        # Include BaseException: an extension's SystemExit must not bypass cleanup.
+        for first_error in (ValueError('first'), SystemExit('first')):
+            context = h.HttpServerContext()
+            calls = []
+            def first():
+                calls.append('first')
+                context.stop()  # Reentrant stop must not repeat callbacks.
+                raise first_error
+            def second():
+                calls.append('second')
+                raise RuntimeError('second')
+            def last():
+                calls.append('last')
+            context.register(lambda request: None, 'GET', name='first', at_stop=first)
+            context.register(lambda request: None, 'GET', name='second', at_stop=second)
+            context.register(lambda request: None, 'GET', name='last', at_stop=last)
+            # Dictionary order is not guaranteed on supported legacy interpreters.
+            from collections import OrderedDict
+            context.commands = OrderedDict((name, context.commands['GET /' + name])
+                                           for name in ('first', 'second', 'last'))
+            server = mock.Mock()
+            server.kill.side_effect = RuntimeError('kill')
+            server.server_close.side_effect = RuntimeError('close')
+            context.server = server
+            with self.assertRaises(type(first_error)) as caught:
+                context.stop()
+            self.assertIs(caught.exception, first_error)
+            self.assertEqual(calls, ['first', 'second', 'last'])
+            context.stop()
+            self.assertEqual(calls, ['first', 'second', 'last'])
+            self.assertEqual(server.kill.call_count, 1)
+            self.assertEqual(server.server_close.call_count, 1)
+
+    def test_transport_failure_still_attempts_close_and_is_propagated(self):
+        for failing_method in ('kill', 'server_close'):
+            context = h.HttpServerContext()
+            server = mock.Mock()
+            first_error = RuntimeError(failing_method)
+            getattr(server, failing_method).side_effect = first_error
+            context.server = server
+            with self.assertRaises(RuntimeError) as caught:
+                context.stop()
+            self.assertIs(caught.exception, first_error)
+            context.stop()
+            self.assertEqual(server.kill.call_count, 1)
+            self.assertEqual(server.server_close.call_count, 1)
+
     def test_custom_stdlib_handler_class_can_be_bound(self):
         from six.moves.BaseHTTPServer import BaseHTTPRequestHandler
         bound = h.HttpServerContext().bind_handler(BaseHTTPRequestHandler)

@@ -56,7 +56,8 @@ from six import (BytesIO,
                  ensure_binary,
                  ensure_text,
                  integer_types,
-                 iteritems)
+                 iteritems,
+                 reraise)
 from six.moves import http_cookies
 from six.moves.urllib import parse as urlparse, request as urlrequest
 from six.moves.BaseHTTPServer import BaseHTTPRequestHandler
@@ -1306,17 +1307,26 @@ class HttpServerContext(object):
             server = self.server
         # Application callbacks may wait for workers. Do not hold the lifecycle
         # lock while they run; the serving thread must be able to finish.
+        cleanups = [(name, cmd.at_stop) for name, cmd in iteritems(self.commands)
+                    if cmd.at_stop]
+        if server:
+            cleanups.extend((('server.kill', server.kill),
+                             ('server.server_close', server.server_close)))
+        first_error = None
         try:
-            for name, cmd in iteritems(self.commands):
-                if cmd.at_stop:
-                    LOG.info("at_stop: %r", name)
-                    cmd.at_stop()
-        finally:
-            if server:
+            for name, cleanup in cleanups:
                 try:
-                    server.kill()
-                finally:
-                    server.server_close()
+                    LOG.info("at_stop: %r", name)
+                    cleanup()
+                except BaseException:
+                    if first_error is None:
+                        first_error = sys.exc_info()
+                    LOG.error('HTTP shutdown cleanup failed: %r', name)
+            if first_error is not None:
+                reraise(*first_error)
+        finally:
+            # Do not retain this frame through the saved exception traceback.
+            first_error = None
 
     def run(self, options=None, http_req_handler=HttpReqHandler,
             http_server_class=KillableThreadingHTTPServer):

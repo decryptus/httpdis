@@ -1,3 +1,8 @@
+Unreleased
+
+  * Finish all shutdown hooks and transport cleanup after a cleanup failure.
+  * Preserve the first exception and traceback; keep repeated stop calls idempotent.
+
 python-httpdis (0.6.31) unstable; urgency=medium
 
   * Add opt-in browser session transport over caller-owned authentication services.
@@ -299,3 +304,4 @@ python-httpdis (0.5) unstable; urgency=medium
   * Initial release.
 
  -- Adrien DELLE CAVE (Decryptus) <adc@doowan.net>  Mon, 27 Nov 2017 17:02:14 +0100
+
