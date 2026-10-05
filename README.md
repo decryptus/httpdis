@@ -137,27 +137,6 @@ serve large downloads through the reverse proxy.
 The dependency loop with sonicprobe is retained because sonicprobe's historical
 HTTP JSON module re-exports HTTPdis. A future major release should untangle it.
 
-## Development and publication
-
-```sh
-python -m pip install -e . mock
-python -m unittest discover -s tests -v
-python -m pip install build twine
-python -m build
-python -m twine check --strict dist/*
-```
-
-Update `VERSION`, `RELEASE` and `setup.yml` together. After tests and distribution
-validation succeed, the master publication workflow creates `vX.Y.Z` and uploads
-via Trusted Publishing (`decryptus/httpdis`, `pypi.yml`, environment `pypi`).
-Already-tagged versions are not replaced by ordinary master commits.
-
-License: GPL-3.0-or-later. Original authors and Wazo/Proformatique copyrights are
-preserved in the source files.
-
-See the [September 2026 code and architecture review](docs/REVIEW.md) (French).
-
-
 ### Independent embedded servers
 
 Use `HttpServerContext` when multiple HTTPdis servers must coexist in one process.
@@ -486,3 +465,8 @@ OPTIONS behavior is unchanged: override it in the embedding browser handler.
 Application scopes, ownership and action confirmation remain application policy.
 This adapter supplies no HTML UI, proxy configuration, TOTP or SSO.
 
+
+## Documentation
+
+- **Users:** installation, configuration, operation and API usage in this README and the user guide.
+- **Contributors:** [architecture, tests and development](https://github.com/decryptus/httpdis/blob/master/CONTRIBUTING.md).
