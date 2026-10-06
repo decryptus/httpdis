@@ -71,10 +71,7 @@ from sonicprobe import helpers
 from sonicprobe.libs import urisup
 from sonicprobe.libs.threading_tcp_server import KillableThreadingHTTPServer
 
-try:
-    from rfc6266_parser import build_header, parse_headers
-except ImportError:
-    from rfc6266 import build_header, parse_headers
+from .content_disposition import build_header, parse_headers
 
 from .config import (BUFFER_SIZE, # pylint: disable=unused-import
                      DEFAULT_CHARSET,
@@ -82,6 +79,9 @@ from .config import (BUFFER_SIZE, # pylint: disable=unused-import
 
 
 LOG              = logging.getLogger('httpdis') # pylint: disable-msg=C0103
+_CONTENT_LENGTH = re.compile(r'[0-9]+\Z')
+_BODYLESS_CODES = (204, 205, 304)
+_NO_LENGTH_CODES = (204, 304)
 
 _METHODS         = ('HEAD',
                     'GET',
@@ -484,10 +484,8 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
         code = response.get_code()
 
-        if response.is_send_body() \
-           and self.command != 'HEAD' \
-           and code >= 200 \
-           and code not in (204, 304):
+        if code >= 200 and code not in _BODYLESS_CODES \
+           and (response.is_send_body() or self.command == 'HEAD'):
             data = ensure_binary(response.data or "")
             clen = len(data)
         else:
@@ -509,7 +507,8 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         self.send_header('Pragma', response.get_header('Pragma') or 'no-cache')
         self.send_header('Connection', response.get_header('Connection') or 'close')
         self.send_header('Content-Type', content_type)
-        self.send_header('Content-Length', str(clen))
+        if code >= 200 and code not in _NO_LENGTH_CODES:
+            self.send_header('Content-Length', str(clen))
 
         for header, value in response.header_items():
             if header.lower() not in tuple(h.lower() for h in _END_EXC_HEADERS):
@@ -517,7 +516,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
         self.end_headers()
 
-        if clen:
+        if clen and response.is_send_body() and self.command != 'HEAD':
             self.wfile.write(ensure_binary(data))
 
     def _mk_error_explain_data(self, code, message, explain, charset):
@@ -935,6 +934,34 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         finally:
             self._query_params = {}
 
+    def _validate_request_framing(self):
+        """Reject ambiguous framing before authentication or application code."""
+        get_all = getattr(self.headers, 'get_all', None) or getattr(self.headers, 'getheaders', None)
+        if get_all is None:
+            get_all = lambda name: ([self.headers[name]] if name in self.headers else [])
+        lengths = get_all('Content-Length') or []
+        encodings = get_all('Transfer-Encoding') or []
+        self.close_connection = True
+        if encodings and lengths:
+            raise self.req_error(400, 'Conflicting request framing')
+        if len(encodings) > 1:
+            raise self.req_error(400, 'Multiple Transfer-Encoding headers')
+        if encodings and encodings[0].strip().lower() != 'identity':
+            raise self.req_error(501, 'Unsupported Transfer-Encoding')
+        values = []
+        for header in lengths:
+            for value in header.split(','):
+                value = value.strip(' \t')
+                if not _CONTENT_LENGTH.match(value):
+                    raise self.req_error(400, 'Invalid Content-Length')
+                try:
+                    values.append(int(value))
+                except ValueError:
+                    raise self.req_error(400, 'Invalid Content-Length')
+        if values and any(value != values[0] for value in values):
+            raise self.req_error(400, 'Conflicting Content-Length headers')
+        return values[0] if values else 0
+
     def data_from_payload(self, cmd):
         """
         Callback for .execute_command() for PATCH/POST/PUT requests
@@ -965,9 +992,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
             charset  = self._cmd.charset or DEFAULT_CHARSET
 
-            tenc     = self.headers.get('Transfer-Encoding')
-            if tenc and tenc.lower() != 'identity':
-                raise self.req_error(501, "Not supported; Transfer-Encoding: %s" % tenc)
+            clen = self._validate_request_framing()
 
             ctype    = self.headers.get('Content-Type')
             if ctype:
@@ -984,14 +1009,6 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                             break
                     if not ct_found:
                         raise self.req_error(415, "Unsupported Content-Type")
-
-            try:
-                clen = int(self.headers.get('Content-Length') or 0)
-            except (ValueError, TypeError):
-                raise self.req_error(411)
-
-            if clen < 0:
-                raise self.req_error(411)
 
             max_body_size = self._cmd.max_body_size
             if max_body_size is None:
@@ -1056,6 +1073,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
         try:
             try:
+                self._validate_request_framing()
                 path = self._pathify() # pylint: disable-msg=W0612
                 cmd  = path[1:]
                 res  = execute(cmd)
@@ -1070,8 +1088,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             else:
                 if not isinstance(res, HttpResponse):
                     req = self.build_response()
-                    if send_body:
-                        req.add_data(res)
+                    req.add_data(res)
                     req.set_send_body(send_body)
                 else:
                     req = res
@@ -1100,6 +1117,11 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         "OPTIONS method"
+        try:
+            self._validate_request_framing()
+        except HttpReqError as error:
+            error.report(self)
+            return
         req = self.build_response(code = 204)
         req.add_header('Access-Control-Allow-Origin', "*")
         req.add_header('Access-Control-Allow-Methods', "OPTIONS, POST")
@@ -1139,6 +1161,15 @@ class HttpServerContext(object):
         self.killed = False
         self._running = False
         self._lifecycle_lock = threading.RLock()
+        self._startup_cleanup = None
+
+    def _unique_commands(self):
+        """Yield each registration once, preserving distinct registrations."""
+        seen = set()
+        for name, cmd in iteritems(self.commands):
+            if id(cmd) not in seen:
+                seen.add(id(cmd))
+                yield name, cmd
 
     def register(self, handler,
                  op,
@@ -1252,6 +1283,7 @@ class HttpServerContext(object):
             self.auth_provider = None
             self.auth_challenge = None
             self.killed = False
+            self._startup_cleanup = None
 
             self.options = DEFAULT_OPTIONS.copy()
             if isinstance(options, dict):
@@ -1291,7 +1323,7 @@ class HttpServerContext(object):
                 self.auth = HttpAuthentication(self.options['auth_basic_file'],
                                            realm = self.options['auth_basic']).parse_file()
 
-            for name, cmd in iteritems(self.commands):
+            for name, cmd in self._unique_commands():
                 if cmd.safe_init:
                     LOG.info("safe_init: %r", name)
                     cmd.safe_init(self.options)
@@ -1323,7 +1355,9 @@ class HttpServerContext(object):
             server = self.server
         # Application callbacks may wait for workers. Do not hold the lifecycle
         # lock while they run; the serving thread must be able to finish.
-        cleanups = [(name, cmd.at_stop) for name, cmd in iteritems(self.commands)
+        commands = (self._unique_commands() if self._startup_cleanup is None
+                    else self._startup_cleanup)
+        cleanups = [(name, cmd.at_stop) for name, cmd in commands
                     if cmd.at_stop]
         if server:
             cleanups.extend((('server.kill', server.kill),
@@ -1354,6 +1388,8 @@ class HttpServerContext(object):
                 raise RuntimeError('initialize the HTTP context before restarting')
             self._running = True
         try:
+            self._startup_cleanup = [(name, cmd) for name, cmd in self._unique_commands()
+                                     if cmd.safe_init]
             with self._lifecycle_lock:
                 if self.killed:
                     return
@@ -1363,12 +1399,15 @@ class HttpServerContext(object):
                     self.bind_handler(http_req_handler), name='httpdis')
                 self.server = server
                 server.httpdis_context = self
-            for name, cmd in iteritems(self.commands):
+            for name, cmd in self._unique_commands():
                 if self.killed:
                     break
                 if cmd.at_start:
+                    if not any(active is cmd for _, active in self._startup_cleanup):
+                        self._startup_cleanup.append((name, cmd))
                     LOG.info("at_start: %r", name)
                     cmd.at_start(self.options if options is None else options)
+            self._startup_cleanup = None
             LOG.info("will now serve")
             while not self.killed:
                 try:
@@ -1380,9 +1419,15 @@ class HttpServerContext(object):
                         LOG.debug("server close")
                     else:
                         raise
+        except BaseException:
+            try:
+                self.stop()
+            except BaseException:
+                LOG.exception('HTTP cleanup failed after startup or serving failure')
+            raise
         finally:
             try:
-                if server is not None:
+                if server is not None and not self.killed:
                     try:
                         server.kill()
                     finally:
