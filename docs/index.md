@@ -5,6 +5,13 @@ Installation, configuration, public APIs and troubleshooting.
 
 .. mdinclude:: ../README.md
 
+.. toctree::
+   :maxdepth: 1
+   :caption: User guide and reference
+
+   release-0.6.34
+   audit-compatibility
+
 Contributor documentation
 -------------------------
 
