@@ -3,7 +3,7 @@
 Ambiguous or malformed request lengths now produce HTTP 400 before authentication
 or handler execution. Identical repeated Content-Length values remain accepted.
 Transfer-Encoding with Content-Length is rejected; unsupported transfer codings
-produce HTTP 501. These checks also apply to GET, HEAD and OPTIONS.
+produce HTTP 400, preserving the strict framing contract used by consumers. These checks also apply to GET, HEAD and OPTIONS.
 
 HEAD responses carry the corresponding GET representation length without a body.
 Responses with status 204 and 304 omit Content-Length; status 205 uses zero.

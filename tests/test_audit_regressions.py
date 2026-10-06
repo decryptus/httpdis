@@ -72,7 +72,7 @@ class FramingAuditTests(unittest.TestCase):
         for headers in ('Content-Length: 2', 'Content-Length: 2\r\nContent-Length: 2', 'Content-Length: 2, 2'):
             self.assertIn(b' 200 ', self.request(headers).split(b'\r\n')[0])
         self.assertEqual(self.calls, [{}, {}, {}])
-        self.assertIn(b' 501 ', self.request('Transfer-Encoding: chunked').split(b'\r\n')[0])
+        self.assertIn(b' 400 ', self.request('Transfer-Encoding: chunked').split(b'\r\n')[0])
         self.assertEqual(len(self.auth), 3)
 
     def test_get_and_options_reject_ambiguous_framing(self):
@@ -162,6 +162,7 @@ class DispositionAuditTests(unittest.TestCase):
             # RFC 5987 wins over the ASCII fallback when emitted.
             self.assertEqual(parse_headers(header).filename_unsafe, name)
         self.assertIn("filename*=UTF-8''caf%C3%A9.txt", build_header(u'caf\u00e9.txt'))
+        self.assertEqual(parse_headers("attachment; filename*=UTF-8''caf%C3%A9.txt").filename_unsafe, u'caf\u00e9.txt')
 
     def test_control_characters_cannot_inject_headers(self):
         for value in ('a\r\nInjected: yes', 'a\x00b'):

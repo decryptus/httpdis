@@ -947,7 +947,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         if len(encodings) > 1:
             raise self.req_error(400, 'Multiple Transfer-Encoding headers')
         if encodings and encodings[0].strip().lower() != 'identity':
-            raise self.req_error(501, 'Unsupported Transfer-Encoding')
+            raise self.req_error(400, 'Unsupported Transfer-Encoding')
         values = []
         for header in lengths:
             for value in header.split(','):
@@ -1420,11 +1420,12 @@ class HttpServerContext(object):
                     else:
                         raise
         except BaseException:
+            original_error = sys.exc_info()
             try:
                 self.stop()
             except BaseException:
                 LOG.exception('HTTP cleanup failed after startup or serving failure')
-            raise
+            reraise(*original_error)
         finally:
             try:
                 if server is not None and not self.killed:

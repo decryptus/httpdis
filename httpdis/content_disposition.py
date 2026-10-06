@@ -4,7 +4,7 @@ from collections import namedtuple
 from email.message import Message
 from email.utils import collapse_rfc2231_value
 import re
-from six import ensure_text, ensure_binary
+from six import PY2, text_type, ensure_text, ensure_binary
 from six.moves.urllib.parse import quote
 
 _TOKEN = re.compile(r"[!#$%&'*+.^_`|~0-9a-zA-Z-]+\Z")
@@ -25,11 +25,18 @@ def parse_headers(value):
         raise ValueError('Invalid Content-Disposition type')
     message = Message()
     message['Content-Disposition'] = value
-    filename = message.get_filename()
+    filename = None
     for name, parameter in message.get_params(header='content-disposition', unquote=True)[1:]:
-        if name.lower() == 'filename' and isinstance(parameter, tuple):
-            filename = collapse_rfc2231_value(parameter)
+        if name.lower() != 'filename':
+            continue
+        if isinstance(parameter, tuple):
+            charset, language, raw_value = parameter
+            if PY2 and isinstance(raw_value, text_type):
+                raw_value = raw_value.encode('latin-1')
+            filename = collapse_rfc2231_value((charset, language, raw_value))
             break
+        if filename is None:
+            filename = parameter
     return _Disposition(disposition, filename)
 
 
