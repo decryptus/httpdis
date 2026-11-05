@@ -3,3 +3,4 @@ sonicprobe>=0.3.52
 six>=1.13.0
 legacy-cgi; python_version >= '3.13'
 legacycrypt; python_version >= '3.13'
+monotonic; python_version < "3"

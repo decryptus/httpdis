@@ -9,6 +9,7 @@ import shutil
 import socket
 import tempfile
 import threading
+import time
 import unittest
 
 try:
@@ -54,7 +55,7 @@ class ContextTests(unittest.TestCase):
             stream.write(user + ':{SHA}' + digest + '\n')
         return path
 
-    def start(self, label, user, limit):
+    def start(self, label, user, limit, handler=j.HttpReqHandler):
         context = j.HttpServerContext()
         ready = threading.Event()
         hooks = []
@@ -73,7 +74,7 @@ class ContextTests(unittest.TestCase):
                       'max_workers': 2})
         def run():
             try:
-                context.run()
+                context.run(http_req_handler=handler)
             except Exception as error:
                 self.errors.append(error)
                 ready.set()
@@ -96,6 +97,66 @@ class ContextTests(unittest.TestCase):
             return response.status, response.read(), dict((name.lower(), value) for name, value in response.getheaders())
         finally:
             connection.close()
+
+    def test_idle_connections_release_all_workers(self):
+        class FastHeader(j.HttpReqHandler):
+            header_read_seconds = .25
+        context, _, _ = self.start('live', 'alice', 64, FastHeader)
+        address = ('127.0.0.1', context.server.server_port)
+        idle = []
+        try:
+            for _ in range(2):
+                idle.append(socket.create_connection(address, 2))
+            self.assertEqual(self.request(context, '/live')[0], 200)
+            for client in idle:
+                self.assertEqual(client.recv(1), b'')
+        finally:
+            for client in idle:
+                client.close()
+
+    def test_trickled_headers_and_body_have_total_deadlines(self):
+        class ShortBudget(j.HttpReqHandler):
+            header_read_seconds = .3
+            body_max_seconds = .3
+        context, _, _ = self.start('live', 'alice', 256, ShortBudget)
+        address = ('127.0.0.1', context.server.server_port)
+        for start, expected in (
+                (b'GET /live HTTP/1.0\r\nX-Slow: ', b''),
+                (b'POST /echo HTTP/1.0\r\nContent-Type: application/json\r\n'
+                 b'Content-Length: 100\r\n\r\n', b'408')):
+            client = socket.create_connection(address, 2)
+            try:
+                client.sendall(start)
+                for _ in range(12):
+                    try:
+                        client.sendall(b' ')
+                    except socket.error:
+                        break
+                    time.sleep(.05)
+                reply = client.recv(4096)
+                if expected:
+                    self.assertIn(expected, reply.split(b'\r\n', 1)[0])
+                else:
+                    self.assertEqual(reply, b'')
+            finally:
+                client.close()
+        self.assertEqual(self.request(context, '/live')[0], 200)
+
+    def test_query_limits_before_authentication_and_routing(self):
+        context, _, _ = self.start('live', 'alice', 64)
+        fields = '&'.join(['a%5B%5D=x'] * h.MAX_QUERY_FIELDS)
+        self.assertEqual(self.request(context, '/identity?' + fields)[0], 401)
+        self.assertEqual(self.request(context, '/identity?' + fields + '&b')[0], 414)
+        nested = 'x' + '%5Bv%5D' * h.MAX_QUERY_DEPTH
+        self.assertEqual(self.request(context, '/missing?' + nested)[0], 404)
+        self.assertEqual(self.request(context, '/missing?' + nested + '%5Bv%5D')[0], 414)
+
+    def test_query_append_preserves_indices_and_subtree_replacement(self):
+        query = [('a[0]', 'named'), ('a[]', 'first'), ('a[][]', 'nested'),
+                 ('b[k][]', 0), ('b[k]', 'reset'), ('b[k][]', 1), ('a[]', 'last')]
+        self.assertEqual(h.HttpReqHandler.querylist_to_dict(query),
+                         {'a': {'0': 'named', 0: 'first', 1: {1: 'nested'}, 2: 'last'},
+                          'b': {'k': {0: 1}}})
 
     def test_two_servers_isolate_routes_auth_options_and_shutdown(self):
         original_version = j.HttpReqHandler.server_version
