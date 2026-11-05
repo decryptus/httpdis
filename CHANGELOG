@@ -1,3 +1,10 @@
+python-httpdis (0.6.39) unstable; urgency=medium
+
+  * Keep the traceback and exception message out of explicit HTTP error responses.
+  * Preserve the selected status, headers and handler response format.
+
+ -- Codex <codex@openai.com>  Thu, 05 Nov 2026 00:00:00 +0000
+
 python-httpdis (0.6.38) unstable; urgency=medium
 
   * Omit query strings, fragments and URI authorities from access logs.
