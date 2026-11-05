@@ -172,7 +172,10 @@ Bind to loopback or a private interface behind a reverse proxy providing TLS,
 request timeouts, connection limits and access controls. This release does not
 claim complete HTTP parser hardening for hostile public traffic. Configure
 `max_body_size` to limit request bodies. Chunked request bodies are not supported.
-Internal exceptions are logged server-side and return a generic 500 to clients.
+Unhandled exceptions return a generic 500. When a handler supplies exception
+information through `HttpReqError(exc=...)` or `send_exception`, HTTPdis keeps
+the chosen status and headers and sends the standard reason for that status.
+The error log entry for this path records the status code.
 
 ## Static files
 

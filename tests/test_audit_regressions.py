@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
+import json
 import socket
+import sys
 import threading
 import unittest
 from collections import OrderedDict
@@ -27,6 +29,12 @@ class FramingAuditTests(unittest.TestCase):
         context.register(lambda r: h.HttpResponse(data=u'caf\u00e9'), ['GET', 'HEAD'], name='raw')
         for code in (204, 205, 304):
             context.register(lambda r, status=code: h.HttpResponse(data='hidden', code=status), 'GET', name=str(code))
+        def unavailable(request):
+            try:
+                raise RuntimeError('fixture-private-value')
+            except RuntimeError:
+                raise request.req_error(503, exc=sys.exc_info(), headers={'Retry-After': '3'})
+        context.register(unavailable, 'GET', name='unavailable')
         context.init({})
         base = context.bind_handler()
         auth = self.auth
@@ -79,6 +87,16 @@ class FramingAuditTests(unittest.TestCase):
         for method in ('GET', 'HEAD', 'OPTIONS'):
             result = self.request('Content-Length: 2\r\nContent-Length: 3', method, 'text')
             self.assertIn(b' 400 ', result.split(b'\r\n')[0])
+
+    def test_explicit_exception_preserves_status_and_headers_without_trace(self):
+        response = self.request('', 'GET', 'unavailable', b'')
+        headers, body = response.split(b'\r\n\r\n', 1)
+        self.assertIn(b' 503 ', headers.split(b'\r\n')[0])
+        self.assertIn(b'retry-after: 3', headers.lower())
+        self.assertEqual(json.loads(body.decode('utf-8')),
+                         {'code': 503, 'message': h.HttpReqHandler.responses[503][0]})
+        self.assertNotIn(b'fixture-private-value', response)
+        self.assertNotIn(b'Traceback', response)
 
     def test_head_reports_get_length_without_body(self):
         get = self.request('', 'GET', 'text', b'')
