@@ -70,6 +70,10 @@ clients should not depend on those old status mappings.
 
 Payload-parser exceptions use a constant error message instead of reflecting
 exception text or request body values. The JSON handler retains JSON errors.
+Access logs retain the method, path, HTTP version, response status and size.
+Query strings, fragments and absolute-URI authorities are omitted. Invalid URIs
+receive a generic 400 diagnostic. Keep secrets out of route paths themselves.
+
 This does not sanitize application-owned error messages or custom logging.
 
 A registered route with `to_auth` enabled authenticates before body reading and
