@@ -149,10 +149,20 @@ continue to use the query handler; this option does not change their behavior.
 Configure `auth_basic_file` with a trusted htpasswd file and `auth_basic` with the
 realm. Set `to_auth=True` on protected routes, or use a username list such as
 `to_auth=['alice']`. A protected route without configured authentication now returns
-401 rather than allowing the request. Invalid credentials are rejected; request
-credentials are isolated between threads. Existing `{SHA}` and system crypt hashes
-remain readable for compatibility; legacy SHA-1/DES hashes are not recommendations
-for new password storage. Basic credentials require HTTPS in transit.
+401. After successful verification and route authorization, handlers can read
+the username from `request.get_server_vars()['HTTP_AUTH_USER']`.
+
+Since 0.6.37, HTTPdis omits `HTTP_AUTH_PASSWD` from server variables and
+`HttpAuthentication.passwd` returns `None`. Migrate handlers that consumed
+the plaintext password to the verified username or to a dedicated downstream
+credential. The incoming `Authorization` header still contains credentials:
+redact it from request logs and use HTTPS for Basic authentication.
+
+HTTPdis reads existing `{SHA}` and system crypt entries. At file load it logs
+a single warning listing any SHA-1 or traditional DES formats detected.
+Replace affected entries with a hash supported on the server. For example,
+on a host with bcrypt support, run `htpasswd -B /path/to/htpasswd alice`,
+enter the password at the prompt, reload the file and verify the login.
 
 Bind to loopback or a private interface behind a reverse proxy providing TLS,
 request timeouts, connection limits and access controls. This release does not

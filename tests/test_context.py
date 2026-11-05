@@ -60,7 +60,9 @@ class ContextTests(unittest.TestCase):
         ready = threading.Event()
         hooks = []
         def identity(request):
-            return {'label': label, 'user': request.get_server_vars().get('HTTP_AUTH_USER')}
+            values = request.get_server_vars()
+            self.assertNotIn('HTTP_AUTH_PASSWD', values)
+            return {'label': label, 'user': values.get('HTTP_AUTH_USER')}
         context.register(identity, 'GET', name='identity', to_auth=True,
                          safe_init=lambda options: hooks.append(('init', options['max_body_size'])),
                          at_start=lambda options: ready.set(),
@@ -97,6 +99,27 @@ class ContextTests(unittest.TestCase):
             return response.status, response.read(), dict((name.lower(), value) for name, value in response.getheaders())
         finally:
             connection.close()
+
+    def test_htpasswd_warns_once_without_account_or_hash_data(self):
+        path = self.credentials('private-account')
+        with open(path, 'a') as stream:
+            stream.write('other-account:abJnggxhB/yWI\n')
+        with mock.patch.object(h.LOG, 'warning') as warning:
+            auth = h.HttpAuthentication(path).parse_file()
+            self.assertTrue(auth.valid_authorization('Basic ' + base64.b64encode(
+                b'private-account:secret').decode('ascii')))
+            self.assertEqual(warning.call_count, 1)
+            arguments = warning.call_args[0]
+            message = arguments[0] % arguments[1:]
+            self.assertIn('SHA-1', message)
+            self.assertIn('DES', message)
+            for value in list(auth.users) + list(auth.users.values()):
+                self.assertNotIn(value, message)
+        with open(path, 'w') as stream:
+            stream.write('# comment\nmodern:$6$salt$verification-data\n')
+        with mock.patch.object(h.LOG, 'warning') as warning:
+            h.HttpAuthentication(path).parse_file()
+            self.assertFalse(warning.called)
 
     def test_idle_connections_release_all_workers(self):
         class FastHeader(j.HttpReqHandler):
