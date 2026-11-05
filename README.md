@@ -77,6 +77,22 @@ parsing. Routing and header/body-size checks may run before authentication;
 unknown routes and wrong methods do not inherit another method's auth policy.
 Applications still own operation-level authorization. Public routes are unchanged.
 
+## Request read deadlines and query limits
+
+The default handler allows 10 seconds in total for the request line and all
+headers. A client that stalls or trickles headers past this deadline loses its
+connection, freeing the worker. After routing, size checks and authentication,
+a nonempty body has a fresh budget of 10 seconds plus one second per 32 KiB,
+up to 120 seconds. A body read timeout returns HTTP 408 and closes the connection.
+A shorter socket timeout set by a custom handler still applies. Handler subclasses
+can set `header_read_seconds`, `body_grace_seconds`, `body_bytes_per_second`
+and `body_max_seconds` to positive values appropriate for their clients.
+
+A request target accepts up to 1,024 ampersand-separated query fields
+(including empty fields) and 32 bracket levels per name. Larger queries return
+HTTP 414 before routing. Encode brackets in URLs, for example
+`?tag%5B%5D=blue&tag%5B%5D=green`.
+
 ## Request body limits
 
 Since HTTPdis 0.6.28, `register(..., max_body_size=...)` sets the body limit

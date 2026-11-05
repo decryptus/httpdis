@@ -11,5 +11,5 @@ Homepage: https://github.com/decryptus/httpdis
 Package: python-httpdis
 Architecture: all
 Homepage: https://github.com/decryptus/httpdis
-Depends: ${misc:Depends}, lsb-release, python-dev (>= 2.7~), python-magic, python-pip, python-lepl
+Depends: ${misc:Depends}, lsb-release, python-dev (>= 2.7~), python-magic, python-monotonic, python-pip, python-lepl
 Description: HTTPdis python libraries

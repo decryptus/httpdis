@@ -21,6 +21,7 @@ import binascii
 import threading
 from hmac import compare_digest
 import errno
+import io
 import json
 import logging
 import os
@@ -30,6 +31,10 @@ import socket
 import sys
 import time
 import traceback
+try:
+    from time import monotonic
+except ImportError:  # Python 2.7
+    from monotonic import monotonic
 #import weakref
 
 import cgi
@@ -80,6 +85,13 @@ from .config import (BUFFER_SIZE, # pylint: disable=unused-import
 
 LOG              = logging.getLogger('httpdis') # pylint: disable-msg=C0103
 _CONTENT_LENGTH = re.compile(r'[0-9]+\Z')
+_QUERY_BRACKETS = re.compile(r'\[([^\]]*)\]')
+MAX_QUERY_FIELDS = 1024
+MAX_QUERY_DEPTH = 32
+HEADER_READ_SECONDS = 10
+BODY_GRACE_SECONDS = 10
+BODY_BYTES_PER_SECOND = 32 * 1024
+BODY_MAX_SECONDS = 120
 _BODYLESS_CODES = (204, 205, 304)
 _NO_LENGTH_CODES = (204, 304)
 
@@ -333,10 +345,69 @@ class HttpAuthentication(object): # pylint: disable=useless-object-inheritance
         return req_error(code = 403)
 
 
+class _DeadlineSocketInput(io.RawIOBase):
+    """Apply the phase budget on each receive, below any input buffering."""
+
+    def __init__(self, connection):
+        io.RawIOBase.__init__(self)
+        self.connection = connection
+        self.deadline = None
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        if self.deadline is None:
+            return self.connection.recv_into(buffer)
+        remaining = self.deadline - monotonic()
+        if remaining <= 0:
+            raise socket.timeout('Request read deadline exceeded')
+        previous = self.connection.gettimeout()
+        self.connection.settimeout(remaining if previous is None else min(remaining, previous))
+        try:
+            return self.connection.recv_into(buffer)
+        finally:
+            self.connection.settimeout(previous)
+
+
 class HttpReqHandler(BaseHTTPRequestHandler):
     """
     Handle one HTTP request
     """
+
+    _deadline_input = None
+    header_read_seconds = HEADER_READ_SECONDS
+    body_grace_seconds = BODY_GRACE_SECONDS
+    body_bytes_per_second = BODY_BYTES_PER_SECOND
+    body_max_seconds = BODY_MAX_SECONDS
+
+    def setup(self):
+        BaseHTTPRequestHandler.setup(self)
+        self.rfile.close()
+        self._deadline_input = _DeadlineSocketInput(self.connection)
+        if self.rbufsize == 0:
+            self.rfile = self._deadline_input
+        else:
+            size = self.rbufsize if self.rbufsize > 0 else io.DEFAULT_BUFFER_SIZE
+            self.rfile = io.BufferedReader(self._deadline_input, size)
+
+    def handle_one_request(self):
+        if self._deadline_input is None:
+            return BaseHTTPRequestHandler.handle_one_request(self)
+        self._deadline_input.deadline = monotonic() + self.header_read_seconds
+        try:
+            return BaseHTTPRequestHandler.handle_one_request(self)
+        except socket.timeout:
+            self.close_connection = True
+        finally:
+            self._deadline_input.deadline = None
+
+    def parse_request(self):
+        try:
+            return BaseHTTPRequestHandler.parse_request(self)
+        finally:
+            if self._deadline_input is not None:
+                self._deadline_input.deadline = None
 
     _DEFAULT_CONTENT_TYPE   = 'text/plain'
     _ALLOWED_CONTENT_TYPES  = []
@@ -681,7 +752,10 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         if not isinstance(query, (list, tuple)):
             return None
 
+        if len(query) > MAX_QUERY_FIELDS:
+            raise HttpReqError(414, 'Too many query fields')
         ret = {}
+        next_indices = {}
 
         for x in query:
             if not x:
@@ -707,9 +781,11 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             if key not in ret:
                 ret[key] = {}
 
-            matched     = re.findall(r'\[([^\]]*)\]', x[0][lbracket:])
+            matched     = _QUERY_BRACKETS.findall(x[0], lbracket, x[0].rfind(']') + 1)
             nb          = len(matched)
 
+            if nb > MAX_QUERY_DEPTH:
+                raise HttpReqError(414, 'Query nesting exceeds limit')
             if nb == 0:
                 ret[key] = value
                 continue
@@ -722,8 +798,13 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
             for i, k in enumerate(matched):
                 if k == '':
-                    while j in ref:
-                        j += 1
+                    # Literal indices are strings. Only [] can allocate integer
+                    # keys. Retain the owner to prevent id reuse after a later
+                    # field replaces a dictionary with a scalar.
+                    entry = next_indices.get(id(ref))
+                    if entry is not None:
+                        j = max(j, entry[1])
+                    next_indices[id(ref)] = (ref, j + 1)
                     k = j
 
                 if i == (nb - 1):
@@ -752,6 +833,12 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             if helpers.has_len(path):
                 path = re.sub(r'^/+', '/', path)
 
+            # Bound field splitting and percent decoding in urisup as well.
+            target = path.partition('#')[0]
+            query_start = target.find('?')
+            if query_start >= 0 and target.count('&', query_start) >= MAX_QUERY_FIELDS:
+                raise self.req_error(414, 'Too many query fields')
+
             (path,
              query,
              self._fragment) = urisup.uri_help_split(path)[2:]
@@ -765,7 +852,10 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             self._path = re.sub(r'/+', '/', path)
 
             if query:
-                self._query_params = self.querylist_to_dict(query)
+                try:
+                    self._query_params = self.querylist_to_dict(query)
+                except HttpReqError as error:
+                    raise self.req_error(error.code, error.text)
 
             return self._path
         except urisup.InvalidURIError as e:
@@ -962,6 +1052,20 @@ class HttpReqHandler(BaseHTTPRequestHandler):
             raise self.req_error(400, 'Conflicting Content-Length headers')
         return values[0] if values else 0
 
+    def _read_body(self, length):
+        if self._deadline_input is None:
+            return self.rfile.read(length)
+        budget = min(self.body_max_seconds,
+                     self.body_grace_seconds + float(length) / self.body_bytes_per_second)
+        self._deadline_input.deadline = monotonic() + budget
+        try:
+            return self.rfile.read(length)
+        except socket.timeout:
+            self.close_connection = True
+            raise self.req_error(408, 'Request body read deadline exceeded')
+        finally:
+            self._deadline_input.deadline = None
+
     def data_from_payload(self, cmd):
         """
         Callback for .execute_command() for PATCH/POST/PUT requests
@@ -1021,7 +1125,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                 self.authenticate(self._cmd.auth_users)
 
             if clen > 0:
-                payload       = self.rfile.read(clen)
+                payload = self._read_body(clen)
                 if len(payload) != clen:
                     raise self.req_error(400, 'Incomplete request body')
                 self._payload = BytesIO(payload)
