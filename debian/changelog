@@ -1,3 +1,11 @@
+python-httpdis (0.6.36) unstable; urgency=medium
+
+  * Deny cross-origin preflights unless the route allows the requesting origin.
+  * Apply the origin policy to the actual response and preserve authentication.
+  * Document frontend migration and validate cross-origin writes in Chrome.
+
+ -- Codex <codex@openai.com>  Thu, 05 Nov 2026 00:00:00 +0000
+
 python-httpdis (0.6.35) unstable; urgency=medium
 
   * Bound header and body read time to release workers held by slow clients.
