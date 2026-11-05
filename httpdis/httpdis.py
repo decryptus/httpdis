@@ -86,6 +86,7 @@ from .config import (BUFFER_SIZE, # pylint: disable=unused-import
 
 LOG              = logging.getLogger('httpdis') # pylint: disable-msg=C0103
 _DES_CRYPT_HASH = re.compile(r'[./0-9A-Za-z]{13}\Z')
+_HTTP_VERSION = re.compile(r'HTTP/[0-9]+[.][0-9]+\Z')
 _CONTENT_LENGTH = re.compile(r'[0-9]+\Z')
 _QUERY_BRACKETS = re.compile(r'\[([^\]]*)\]')
 MAX_QUERY_FIELDS = 1024
@@ -530,13 +531,29 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         pass # pylint: disable=unnecessary-pass
 
     def log_request(self, code='-', size='-'):
-        """
-        Called by send_response()
-        TODO: a configuration option to log or not
-            (maybe using logging filters?)
-        TODO: discriminate by code and dispatch to various log levels
-        """
-        LOG.info("%r %s %s", self.requestline, code, size)
+        """Log a query-free request target, including on early parser errors."""
+        fields = self.requestline.split()
+        line = '<invalid request>'
+        if (len(fields) in (2, 3) and fields[0] in _METHODS + ('OPTIONS',)
+                and (len(fields) == 2 or _HTTP_VERSION.match(fields[2]))):
+            target = fields[1].partition('?')[0].partition('#')[0]
+            if target.startswith('/') and not target.startswith('//'):
+                path = target
+            elif target == '*':
+                path = '*'
+            else:
+                # Absolute-form targets may contain authority credentials.
+                # Never fall back to the original string on a parsing error.
+                path = '-'
+                try:
+                    parsed = urlparse.urlsplit(target)
+                    if parsed.netloc and parsed.scheme in ('', 'http', 'https'):
+                        path = parsed.path or '/'
+                except ValueError:
+                    pass
+            fields[1] = path
+            line = ' '.join(fields)
+        LOG.info("%r %s %s", line, code, size)
 
     def send_response(self, code, message=None, size='-'):
         """
@@ -880,9 +897,9 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                     raise self.req_error(error.code, error.text)
 
             return self._path
-        except urisup.InvalidURIError as e:
-            LOG.error("invalid URI: %s", e)
-            raise self.req_error(400, str(e))
+        except urisup.InvalidURIError:
+            LOG.error("invalid request URI")
+            raise self.req_error(400, "Invalid request URI")
 
     def authenticate(self, auth_users = None):
         context = self.get_context()

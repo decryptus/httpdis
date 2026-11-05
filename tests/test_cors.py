@@ -1,8 +1,10 @@
 """Exercise route-level browser access on the wire, including handler errors."""
+import logging
 import re
 import threading
 import unittest
 
+from six import StringIO
 from six.moves import http_client
 from six.moves.BaseHTTPServer import HTTPServer
 from httpdis import httpdis as h
@@ -16,10 +18,12 @@ ROUTE = re.compile(r'^jobs/(?P<id>[0-9]+)$')
 class CorsTests(unittest.TestCase):
     def setUp(self):
         self.calls = []
+        self.queries = []
         self.shared = h.HttpResponse(data='result', headers={'Vary': 'Accept-Encoding'})
         context = j.HttpServerContext()
         context.init({})
         def callback(request):
+            self.queries.append(request.query_params().copy())
             self.calls.append(request.query_params().get('id'))
             return self.shared
         context.register(callback, 'POST', name=ROUTE, cors_origins=[ORIGIN])
@@ -64,6 +68,32 @@ class CorsTests(unittest.TestCase):
             self.assertEqual(reply.status, 403)
             self.assertIsNone(reply.getheader('Access-Control-Allow-Origin'))
         self.assertEqual(self.calls, [])
+
+    def test_access_log_omits_query_and_authority_on_success_and_failure(self):
+        stream = StringIO()
+        handler = logging.StreamHandler(stream)
+        level = h.LOG.level
+        h.LOG.addHandler(handler)
+        h.LOG.setLevel(logging.DEBUG)
+        try:
+            cases = (
+                ('POST', '/jobs/1?target=http%3A%2F%2Fupstream%2F%3Ftoken%3DPRIVATE_QUERY', 200),
+                ('GET', 'http://user:PRIVATE_AUTH@localhost/missing?token=PRIVATE_QUERY', 404),
+                ('GET', '/missing?token=PRIVATE_QUERY#PRIVATE_FRAGMENT', 404),
+                ('GET', '/missing?x={PRIVATE_INVALID}', 400),
+                ('GET', '/private?token=PRIVATE_AUTH', 401),
+            )
+            for method, path, status in cases:
+                self.assertEqual(self.request(method, path, []).status, status)
+            self.assertEqual(self.queries[0]['target'], 'http://upstream/?token=PRIVATE_QUERY')
+            output = stream.getvalue()
+            self.assertNotIn('PRIVATE_', output)
+            self.assertIn('POST /jobs/1 HTTP/1.1', output)
+            self.assertIn('GET /missing HTTP/1.1', output)
+            self.assertIn(' 404 ', output)
+        finally:
+            h.LOG.removeHandler(handler)
+            h.LOG.setLevel(level)
 
     def test_plain_options_lists_registered_methods(self):
         response = self.request('OPTIONS', '/jobs/1', [])
