@@ -3,9 +3,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """httpsdis.httpsdis"""
 
-# TODO: a configuration option to send the backtraces
-# or not to the client in error report
-
 # TODO: locks and implements SIGHUP (by reloading the configuration)
 
 # TODO: add some teardown callbacks?
@@ -30,7 +27,6 @@ import signal
 import socket
 import sys
 import time
-import traceback
 try:
     from time import monotonic
 except ImportError:  # Python 2.7
@@ -687,16 +683,10 @@ class HttpReqHandler(BaseHTTPRequestHandler):
                                 "text/html")
 
     def send_exception(self, code, exc_info=None, headers=None):
-        "send an error response including a backtrace to the client"
-        if headers is None:
-            headers = {}
-
-        if not exc_info:
-            exc_info = sys.exc_info()
-
-        self.send_error_msg(code,
-                            traceback.format_exception(*exc_info),
-                            headers)
+        """Keep the public status and headers while withholding exception details."""
+        LOG.error('HTTP request failed with status %s', code)
+        reason = self.responses.get(code, ('Request failed', ''))[0]
+        self.send_error_msg(code, reason, headers)
 
     def send_error_json(self, code, message, headers=None):
         "send an error to the client. text message is formatted in a json stream"
