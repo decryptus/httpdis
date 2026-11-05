@@ -9,6 +9,7 @@ Installation, configuration, public APIs and troubleshooting.
    :maxdepth: 1
    :caption: User guide and reference
 
+   release-0.6.37
    release-0.6.36
    release-0.6.35
    release-0.6.34

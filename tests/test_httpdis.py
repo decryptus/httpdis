@@ -25,6 +25,8 @@ class HttpTests(unittest.TestCase):
         auth.users['alice'] = '{SHA}' + base64.b64encode(hashlib.sha1(b'secret').digest()).decode('ascii')
         self.assertTrue(auth.valid_authorization('Basic ' + base64.b64encode(b'alice:secret').decode('ascii')))
         self.assertEqual(auth.user, 'alice')
+        self.assertIsNone(auth.passwd)
+        self.assertNotIn('passwd', vars(auth._credentials))
         for invalid in ('', 'Basic', 'Bearer abc', 'Basic !!!', 'Basic bm9jb2xvbg==', 'Basic YWxpY2U6YmFk'):
             self.assertFalse(auth.valid_authorization(invalid))
             self.assertIsNone(auth.user)

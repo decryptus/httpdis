@@ -85,6 +85,7 @@ from .config import (BUFFER_SIZE, # pylint: disable=unused-import
 
 
 LOG              = logging.getLogger('httpdis') # pylint: disable-msg=C0103
+_DES_CRYPT_HASH = re.compile(r'[./0-9A-Za-z]{13}\Z')
 _CONTENT_LENGTH = re.compile(r'[0-9]+\Z')
 _QUERY_BRACKETS = re.compile(r'\[([^\]]*)\]')
 MAX_QUERY_FIELDS = 1024
@@ -284,21 +285,24 @@ class HttpAuthentication(object): # pylint: disable=useless-object-inheritance
         self._credentials = threading.local()
 
     def parse_file(self):
-        f = None
-
-        try:
-            with open(self.htpasswd, 'r') as f:
-                for line in f.readlines():
-                    tmp = line.strip()
-                    if not tmp or tmp.startswith('#') or tmp.find(':') < 1:
-                        continue
-                    user, passwd = tmp.split(':', 1)
-                    if not passwd:
-                        continue
-                    self.users[user] = passwd
-        finally:
-            if f:
-                f.close()
+        legacy_formats = set()
+        with open(self.htpasswd, 'r') as stream:
+            for line in stream:
+                entry = line.strip()
+                if not entry or entry.startswith('#') or entry.find(':') < 1:
+                    continue
+                user, secret = entry.split(':', 1)
+                if not secret:
+                    continue
+                self.users[user] = secret
+                if secret.startswith('{SHA}'):
+                    legacy_formats.add('SHA-1')
+                elif _DES_CRYPT_HASH.match(secret):
+                    legacy_formats.add('DES')
+        if legacy_formats:
+            LOG.warning('Legacy Basic password hashes detected (%s). '
+                        'Update the affected htpasswd entries.',
+                        ', '.join(sorted(legacy_formats)))
 
         return self
 
@@ -308,10 +312,11 @@ class HttpAuthentication(object): # pylint: disable=useless-object-inheritance
 
     @property
     def passwd(self):
-        return getattr(self._credentials, 'passwd', None)
+        """Compatibility accessor. The verifier retains only the username."""
+        return None
 
     def valid_authorization(self, authorization):
-        self._credentials.user = self._credentials.passwd = None
+        self._credentials.user = None
         try:
             kind, data = authorization.split(None, 1)
             if kind.lower() != 'basic':
@@ -333,7 +338,7 @@ class HttpAuthentication(object): # pylint: disable=useless-object-inheritance
             calculated = crypt(password, secret)
         if not calculated or not compare_digest(ensure_binary(secret), ensure_binary(calculated)):
             return False
-        self._credentials.user, self._credentials.passwd = user, password
+        self._credentials.user = user
         return True
 
     def unauthorized(self, req_error = None):
@@ -896,19 +901,11 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         if not auth:
             raise auth_context.unauthorized()
 
-        allowed = auth_context.valid_authorization(auth)
-
-        if not allowed or None in (auth_context.user, auth_context.passwd):
+        if not auth_context.valid_authorization(auth) or auth_context.user is None:
             raise auth_context.unauthorized()
-
-        self._SERVER['HTTP_AUTH_USER']   = auth_context.user
-        self._SERVER['HTTP_AUTH_PASSWD'] = auth_context.passwd
-
         if auth_users and auth_context.user not in auth_users:
             raise auth_context.unauthorized()
-
-        if not allowed:
-            raise auth_context.unauthorized()
+        self._SERVER['HTTP_AUTH_USER'] = auth_context.user
 
     def _authenticate_provider(self, provider, auth_users):
         headers = tuple((key.lower(), value) for key, value in self.headers.items()

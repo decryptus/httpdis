@@ -1,3 +1,10 @@
+python-httpdis (0.6.37) unstable; urgency=medium
+
+  * Remove plaintext Basic passwords from request variables and worker state.
+  * Warn once per htpasswd load when SHA-1 or traditional DES entries are present.
+
+ -- Codex <codex@openai.com>  Thu, 05 Nov 2026 00:00:00 +0000
+
 python-httpdis (0.6.36) unstable; urgency=medium
 
   * Deny cross-origin preflights unless the route allows the requesting origin.
