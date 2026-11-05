@@ -77,6 +77,34 @@ parsing. Routing and header/body-size checks may run before authentication;
 unknown routes and wrong methods do not inherit another method's auth policy.
 Applications still own operation-level authorization. Public routes are unchanged.
 
+## Browser access from a separate origin (CORS)
+
+HTTPdis denies cross-origin preflight requests by default. If a separate web
+frontend needs access, register its exact origin on each route and method it uses:
+
+```python
+server.register(create_job, 'POST', name='jobs', to_auth=True,
+                cors_origins=['https://console.example.org'])
+```
+
+Use HTTPS origins without a path or trailing slash. Local development can use
+an HTTP loopback origin such as `http://127.0.0.1:3000`. An empty list is the
+default. Wildcards and `null` are rejected at registration.
+
+An allowed preflight returns 204 for the requested route and method.
+It accepts the request headers `Accept`, `Authorization`, `Content-Type` and
+`X-Requested-With`. Send API tokens explicitly and use `credentials: "omit"`.
+The actual response, including a route's authentication failure, carries the
+allowed origin. Keep cookie-based browser sessions on their dedicated origin.
+
+**Migration from 0.6.35 and earlier.** Frontends that relied on the generic
+preflight need an explicit registration. A plain `OPTIONS` request returns 405
+and the registered methods for an existing route, or 404 for an unknown path.
+Same-origin browser clients and server-to-server clients need no CORS setup.
+Browsers can send simple requests without preflight and can reuse preflight
+decisions cached before an upgrade. Keep authentication and CSRF checks on
+state-changing routes.
+
 ## Request read deadlines and query limits
 
 The default handler allows 10 seconds in total for the request line and all
@@ -300,8 +328,7 @@ the optional local service described below supplies those separately. Browser lo
 HTTP routes and TOTP enrollment/replay protection remain pending. The contract does
 not configure cookies, HTTPS, CSRF or CORS automatically.
 Browser sessions must not be exposed until those transport controls and the backend
-are implemented and tested together. Existing HTTPdis CORS/OPTIONS behavior is
-unchanged by this compatibility-preserving addition.
+are implemented and tested together. Configure cross-origin API access separately on the intended routes.
 
 ## Local authentication backend (development, optional)
 
@@ -476,8 +503,7 @@ Embedding requirements: serve only fixed public login/assets routes; protect all
 business routes; bound login request bodies; prohibit CORS/preflight in browser
 mode; apply no-store, CSP, frame denial and nosniff headers to errors as well as
 successes; never log credentials, payloads or cookies. `require_browser` is exposed
-for checking public routes before parsing their body. HTTPdis's historical generic
-OPTIONS behavior is unchanged: override it in the embedding browser handler.
+for checking public routes before parsing their body. Leave CORS disabled on cookie-authenticated routes.
 Application scopes, ownership and action confirmation remain application policy.
 This adapter supplies no HTML UI, proxy configuration, TOTP or SSO.
 

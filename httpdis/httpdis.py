@@ -76,6 +76,7 @@ from sonicprobe import helpers
 from sonicprobe.libs import urisup
 from sonicprobe.libs.threading_tcp_server import KillableThreadingHTTPServer
 
+from .auth_browser import browser_origin
 from .content_disposition import build_header, parse_headers
 
 from .config import (BUFFER_SIZE, # pylint: disable=unused-import
@@ -92,6 +93,8 @@ HEADER_READ_SECONDS = 10
 BODY_GRACE_SECONDS = 10
 BODY_BYTES_PER_SECOND = 32 * 1024
 BODY_MAX_SECONDS = 120
+_CORS_REQUEST_HEADERS = frozenset(('accept', 'authorization', 'content-type', 'x-requested-with'))
+_CORS_PREFLIGHT_VARY = 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers'
 _BODYLESS_CODES = (204, 205, 304)
 _NO_LENGTH_CODES = (204, 304)
 
@@ -138,13 +141,17 @@ class Command(object): # pylint: disable=too-few-public-methods,useless-object-i
                  content_type,
                  to_auth,
                  to_log,
-                 max_body_size = None):
+                 max_body_size = None,
+                 cors_origins = ()):
         if max_body_size is not None \
            and (isinstance(max_body_size, bool) \
                 or not isinstance(max_body_size, integer_types) \
                 or max_body_size < 0):
             raise ValueError("max_body_size must be a non-negative integer or None")
 
+        if not isinstance(cors_origins, (list, tuple)):
+            raise ValueError('cors_origins must be a list or tuple of explicit origins')
+        self.cors_origins = frozenset(browser_origin(origin) for origin in cors_origins)
         self.max_body_size = max_body_size
         self.handler       = handler
         self.name          = name
@@ -581,7 +588,17 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         if code >= 200 and code not in _NO_LENGTH_CODES:
             self.send_header('Content-Length', str(clen))
 
+        route_cors = self._cmd and self._cmd.cors_origins and self.command != 'OPTIONS'
+        if route_cors:
+            # Emit per request. A handler may reuse a response across origins.
+            self.send_header('Vary', 'Origin')
+            origin = self._allowed_origin(self._cmd)
+            if origin:
+                self.send_header('Access-Control-Allow-Origin', origin)
+
         for header, value in response.header_items():
+            if route_cors and header.lower() in ('access-control-allow-origin', 'access-control-allow-credentials'):
+                continue
             if header.lower() not in tuple(h.lower() for h in _END_EXC_HEADERS):
                 self.send_header(header, value)
 
@@ -957,6 +974,22 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
         return repr(data)
 
+    def _resolve_command(self, method, cmd):
+        context = self.get_context()
+        if not isinstance(self._query_params, dict):
+            self._query_params = {}
+        named = context.named_commands.get('%s /%s' % (method, cmd))
+        if named is not None:
+            return named
+        for key in sorted(context.regex_commands, key=len, reverse=True):
+            if key.startswith(method + ' '):
+                command = context.regex_commands[key]
+                match = command.name.match(cmd)
+                if match:
+                    self._query_params.update(match.groupdict())
+                    return command
+        return None
+
     def _missing_command(self, cmd):
         """Distinguish an unknown path from an unsupported registered method."""
         context = self.get_context()
@@ -977,25 +1010,8 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         """
         Callback for .execute_command() for DELETE/GET/HEAD requests
         """
-        context = self.get_context()
         res  = None
-        ckey = "%s /%s" % (self.command, cmd)
-
-        if not isinstance(self._query_params, dict):
-            self._query_params = {}
-
-        if ckey in context.named_commands:
-            self._cmd = context.named_commands[ckey]
-        else:
-            for key in sorted(context.regex_commands, key=len, reverse=True):
-                if not key.startswith("%s " % self.command):
-                    continue
-
-                m = context.regex_commands[key].name.match(cmd)
-                if m:
-                    self._cmd = context.regex_commands[key]
-                    self._query_params.update(m.groupdict())
-                    break
+        self._cmd = self._resolve_command(self.command, cmd)
 
         try:
             if not self._cmd:
@@ -1024,13 +1040,22 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         finally:
             self._query_params = {}
 
+    def _header_values(self, name):
+        get_all = getattr(self.headers, 'get_all', None) or getattr(self.headers, 'getheaders', None)
+        if get_all is not None:
+            return get_all(name) or []
+        return [self.headers[name]] if name in self.headers else []
+
+    def _allowed_origin(self, command):
+        origins = self._header_values('Origin')
+        if len(origins) == 1 and origins[0] in command.cors_origins:
+            return origins[0]
+        return None
+
     def _validate_request_framing(self):
         """Reject ambiguous framing before authentication or application code."""
-        get_all = getattr(self.headers, 'get_all', None) or getattr(self.headers, 'getheaders', None)
-        if get_all is None:
-            get_all = lambda name: ([self.headers[name]] if name in self.headers else [])
-        lengths = get_all('Content-Length') or []
-        encodings = get_all('Transfer-Encoding') or []
+        lengths = self._header_values('Content-Length')
+        encodings = self._header_values('Transfer-Encoding')
         self.close_connection = True
         if encodings and lengths:
             raise self.req_error(400, 'Conflicting request framing')
@@ -1072,23 +1097,7 @@ class HttpReqHandler(BaseHTTPRequestHandler):
         """
         context = self.get_context()
         multipart = False
-        ckey      = "%s /%s" % (self.command, cmd)
-
-        if not isinstance(self._query_params, dict):
-            self._query_params = {}
-
-        if ckey in context.named_commands:
-            self._cmd = context.named_commands[ckey]
-        else:
-            for key in sorted(context.regex_commands, key=len, reverse=True):
-                if not key.startswith("%s " % self.command):
-                    continue
-
-                m = context.regex_commands[key].name.match(cmd)
-                if m:
-                    self._cmd = context.regex_commands[key]
-                    self._query_params.update(m.groupdict())
-                    break
+        self._cmd = self._resolve_command(self.command, cmd)
 
         try:
             if not self._cmd:
@@ -1221,17 +1230,35 @@ class HttpReqHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         "OPTIONS method"
+        self._query_params = {}
+        self._cmd = None
         try:
             self._validate_request_framing()
+            cmd = self._pathify()[1:]
+            methods = self._header_values('Access-Control-Request-Method')
+            if not methods:
+                raise self._missing_command(cmd)
+            if len(methods) != 1 or methods[0] not in _METHODS:
+                raise self.req_error(403)
+            command = self._resolve_command(methods[0], cmd)
+            origin = self._allowed_origin(command) if command is not None else None
+            if not origin:
+                raise self.req_error(403)
+            headers = [name.strip().lower()
+                       for line in self._header_values('Access-Control-Request-Headers')
+                       for name in line.split(',')]
+            if not _CORS_REQUEST_HEADERS.issuperset(headers):
+                raise self.req_error(403)
         except HttpReqError as error:
             error.report(self)
             return
-        req = self.build_response(code = 204)
-        req.add_header('Access-Control-Allow-Origin', "*")
-        req.add_header('Access-Control-Allow-Methods', "OPTIONS, POST")
-        req.add_header('Access-Control-Allow-Headers', "Origin, X-Requested-With, Content-Type, Accept, Authorization")
-        req.add_header('Access-Control-Max-Age', 1728000)
-        self.end_response(req)
+        response = self.build_response(code=204)
+        response.add_header('Access-Control-Allow-Origin', origin)
+        response.add_header('Access-Control-Allow-Methods', methods[0])
+        response.add_header('Vary', _CORS_PREFLIGHT_VARY)
+        if headers:
+            response.add_header('Access-Control-Allow-Headers', ', '.join(sorted(set(headers))))
+        self.end_response(response)
 
     def do_PATCH(self):
         "POST method"
@@ -1288,7 +1315,8 @@ class HttpServerContext(object):
                  content_type  = None,
                  to_auth       = False,
                  to_log        = True,
-                 max_body_size = None):
+                 max_body_size = None,
+                 cors_origins = ()):
         """
         Register a command
         @handler: function to execute when the command is received
@@ -1304,6 +1332,7 @@ class HttpServerContext(object):
         @content_type: content_type
         @to_auth: use basic authentification if True
         @to_log: log request if True
+        @cors_origins: explicit origins allowed to read this route from a browser
         @max_body_size: maximum request body bytes; None inherits this context's limit
 
         prototypes:
@@ -1361,7 +1390,8 @@ class HttpServerContext(object):
                       content_type,
                       to_auth,
                       to_log,
-                      max_body_size)
+                      max_body_size,
+                      cors_origins)
 
         for method in methods:
             if not is_reg:
@@ -1576,10 +1606,11 @@ def register(handler,
              content_type  = None,
              to_auth       = False,
              to_log        = True,
-             max_body_size = None):
+             max_body_size = None,
+             cors_origins = ()):
     return _DEFAULT_CONTEXT.register(handler, op, safe_init, at_start, name,
                                      at_stop, static, root, replacement, charset,
-                                     content_type, to_auth, to_log, max_body_size)
+                                     content_type, to_auth, to_log, max_body_size, cors_origins)
 
 
 def sigterm_handler(signum, stack_frame):
