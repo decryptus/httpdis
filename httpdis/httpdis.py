@@ -275,7 +275,10 @@ HTTP_REQERROR_CLASS = HttpReqError
 
 
 class HttpAuthentication(object): # pylint: disable=useless-object-inheritance
-    def __init__(self, htpasswd, realm=None):
+    def __init__(self, htpasswd, realm=None, allow_legacy_hashes=False):
+        if type(allow_legacy_hashes) is not bool:
+            raise ValueError('auth_basic_allow_legacy_hashes must be a boolean')
+        self.allow_legacy_hashes = allow_legacy_hashes
         self.htpasswd = htpasswd
         self.realm    = realm
         self.users    = {}
@@ -298,8 +301,9 @@ class HttpAuthentication(object): # pylint: disable=useless-object-inheritance
                     legacy_formats.add('DES')
         if legacy_formats:
             LOG.warning('Legacy Basic password hashes detected (%s). '
-                        'Update the affected htpasswd entries.',
-                        ', '.join(sorted(legacy_formats)))
+                        'These entries are %s. Replace the affected htpasswd entries.',
+                        ', '.join(sorted(legacy_formats)),
+                        'temporarily enabled' if self.allow_legacy_hashes else 'disabled')
 
         return self
 
@@ -328,6 +332,8 @@ class HttpAuthentication(object): # pylint: disable=useless-object-inheritance
             return False
         secret = self.users.get(user)
         if not secret:
+            return False
+        if not self.allow_legacy_hashes and (secret.startswith('{SHA}') or _DES_CRYPT_HASH.match(secret)):
             return False
         if secret.startswith('{SHA}'):
             calculated = '{SHA}' + b64encode(sha1(passwd).digest()).decode('ascii')
@@ -1459,7 +1465,8 @@ class HttpServerContext(object):
 
             if self.options['auth_basic_file']:
                 self.auth = HttpAuthentication(self.options['auth_basic_file'],
-                                           realm = self.options['auth_basic']).parse_file()
+                                           realm=self.options['auth_basic'],
+                                           allow_legacy_hashes=self.options['auth_basic_allow_legacy_hashes']).parse_file()
 
             for name, cmd in self._unique_commands():
                 if cmd.safe_init:
