@@ -21,7 +21,7 @@ class HttpTests(unittest.TestCase):
         return handler
 
     def test_basic_auth_accepts_valid_and_rejects_malformed(self):
-        auth = h.HttpAuthentication(None)
+        auth = h.HttpAuthentication(None, allow_legacy_hashes=True)
         auth.users['alice'] = '{SHA}' + base64.b64encode(hashlib.sha1(b'secret').digest()).decode('ascii')
         self.assertTrue(auth.valid_authorization('Basic ' + base64.b64encode(b'alice:secret').decode('ascii')))
         self.assertEqual(auth.user, 'alice')
@@ -32,7 +32,7 @@ class HttpTests(unittest.TestCase):
             self.assertIsNone(auth.user)
 
     def test_credentials_are_thread_local(self):
-        auth = h.HttpAuthentication(None)
+        auth = h.HttpAuthentication(None, allow_legacy_hashes=True)
         auth.users['alice'] = '{SHA}' + base64.b64encode(hashlib.sha1(b'secret').digest()).decode('ascii')
         auth.valid_authorization('Basic YWxpY2U6c2VjcmV0')
         result = []

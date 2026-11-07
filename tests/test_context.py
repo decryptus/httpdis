@@ -72,6 +72,7 @@ class ContextTests(unittest.TestCase):
         context.register(lambda request: request.payload_params(), 'POST', name='echo')
         context.init({'listen_addr': '127.0.0.1', 'listen_port': 0,
                       'auth_basic_file': self.credentials(user), 'auth_basic': label,
+                      'auth_basic_allow_legacy_hashes': True,
                       'server_version': label, 'sys_version': '', 'max_body_size': limit,
                       'max_workers': 2})
         def run():
@@ -106,7 +107,7 @@ class ContextTests(unittest.TestCase):
             stream.write('other-account:abJnggxhB/yWI\n')
         with mock.patch.object(h.LOG, 'warning') as warning:
             auth = h.HttpAuthentication(path).parse_file()
-            self.assertTrue(auth.valid_authorization('Basic ' + base64.b64encode(
+            self.assertFalse(auth.valid_authorization('Basic ' + base64.b64encode(
                 b'private-account:secret').decode('ascii')))
             self.assertEqual(warning.call_count, 1)
             arguments = warning.call_args[0]
@@ -115,6 +116,10 @@ class ContextTests(unittest.TestCase):
             self.assertIn('DES', message)
             for value in list(auth.users) + list(auth.users.values()):
                 self.assertNotIn(value, message)
+        self.assertFalse(auth.valid_authorization('Basic ' + base64.b64encode(
+            b'other-account:password').decode('ascii')))
+        with self.assertRaises(ValueError):
+            h.HttpAuthentication(path, allow_legacy_hashes='false')
         with open(path, 'w') as stream:
             stream.write('# comment\nmodern:$6$salt$verification-data\n')
         with mock.patch.object(h.LOG, 'warning') as warning:

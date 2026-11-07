@@ -162,8 +162,10 @@ the plaintext password to the verified username or to a dedicated downstream
 credential. The incoming `Authorization` header still contains credentials:
 redact it from request logs and use HTTPS for Basic authentication.
 
-HTTPdis reads existing `{SHA}` and system crypt entries. At file load it logs
-a single warning listing any SHA-1 or traditional DES formats detected.
+HTTPdis rejects logins using `{SHA}` or traditional DES password hashes by default.
+A warning lists the detected formats when the file is loaded. Other system crypt
+entries continue to work. For a temporary migration window, set the boolean
+`auth_basic_allow_legacy_hashes` to `true` and remove it after rehashing.
 Replace affected entries with a hash supported on the server. For example,
 on a host with bcrypt support, run `htpasswd -B /path/to/htpasswd alice`,
 enter the password at the prompt, reload the file and verify the login.
