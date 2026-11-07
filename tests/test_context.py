@@ -37,6 +37,29 @@ class ContextTests(unittest.TestCase):
         self.errors = []
         self.addCleanup(self.stop_servers)
 
+    def test_backlog_reaches_listen_for_each_context(self):
+        with mock.patch.object(socket, 'socket') as make_socket:
+            sock = make_socket.return_value
+            sock.getsockname.return_value = ('127.0.0.1', 12345)
+            for context, options in ((h.HttpServerContext(), {}),
+                                     (j.HttpServerContext(), {'listen_backlog': '256'}),
+                                     (h.HttpServerContext(), {})):
+                context.init(options)
+                with mock.patch.object(h.HttpListeningServer, 'serve_until_killed',
+                                       side_effect=context.stop):
+                    context.run()
+            self.assertEqual([mock.call(128), mock.call(256), mock.call(128)],
+                             sock.listen.call_args_list)
+
+    def test_invalid_backlog_fails_before_opening_socket(self):
+        with mock.patch.object(socket, 'socket') as make_socket:
+            for value in (-1, True, 1.5, 'bad', 2 ** 31):
+                ctx = h.HttpServerContext()
+                ctx.init({'listen_backlog': value})
+                with self.assertRaises(ValueError):
+                    ctx.run()
+            self.assertFalse(make_socket.called)
+
     def restore_globals(self):
         for name, value in self.saved.items():
             setattr(h, name, value)

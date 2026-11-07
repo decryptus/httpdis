@@ -43,6 +43,12 @@ server.run(options)
 curl http://127.0.0.1:8080/health
 ```
 
+Set `listen_backlog` alongside `listen_addr` and `listen_port` to configure the
+TCP accept queue for the built-in listener. The default is 128 pending connections.
+For example, set `options['listen_backlog'] = 256` before `init()`. The operating
+system can cap the queue. Configure worker concurrency separately with `max_workers`.
+Custom server factories receive the option in their configuration.
+
 Handlers receive a request with `get_path()`, `query_params()`, `payload_params()`,
 `get_headers()` and `get_server_vars()`. They may return data or an `HttpResponse`
 / `HttpResponseJson` to control status and headers. `register` supports method

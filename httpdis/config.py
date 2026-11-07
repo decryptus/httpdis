@@ -18,6 +18,7 @@ DEFAULT_OPTIONS  = {'auth_basic':      None,
                     'max_life_time':   0,
                     'listen_addr':     None,
                     'listen_port':     None,
+                    'listen_backlog':  128,
                     'server_version':  None,
                     'sys_version':     None}
 
