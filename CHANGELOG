@@ -2,34 +2,34 @@ python-httpdis (0.7.1) unstable; urgency=medium
 
   * Make the TCP listen backlog configurable per server; default to 128.
 
- -- Codex <codex@openai.com>  Sat, 07 Nov 2026 07:00:00 +0100
+ -- Adrien Delle Cave <pypi@doowan.net>  Sat, 07 Nov 2026 07:00:00 +0100
 
 python-httpdis (0.7.0) unstable; urgency=medium
 
   * Disable SHA-1 and traditional DES Basic password hashes by default.
 
- -- Codex <codex@openai.com>  Sat, 07 Nov 2026 06:40:00 +0100
+ -- Adrien Delle Cave <pypi@doowan.net>  Sat, 07 Nov 2026 06:40:00 +0100
 
 python-httpdis (0.6.39) unstable; urgency=medium
 
   * Keep the traceback and exception message out of explicit HTTP error responses.
   * Preserve the selected status, headers and handler response format.
 
- -- Codex <codex@openai.com>  Thu, 05 Nov 2026 00:00:00 +0000
+ -- Adrien Delle Cave <pypi@doowan.net>  Thu, 05 Nov 2026 00:00:00 +0000
 
 python-httpdis (0.6.38) unstable; urgency=medium
 
   * Omit query strings, fragments and URI authorities from access logs.
   * Return a generic diagnostic for invalid URIs without logging parser input.
 
- -- Codex <codex@openai.com>  Thu, 05 Nov 2026 03:26:28 +0000
+ -- Adrien Delle Cave <pypi@doowan.net>  Thu, 05 Nov 2026 03:26:28 +0000
 
 python-httpdis (0.6.37) unstable; urgency=medium
 
   * Remove plaintext Basic passwords from request variables and worker state.
   * Warn once per htpasswd load when SHA-1 or traditional DES entries are present.
 
- -- Codex <codex@openai.com>  Thu, 05 Nov 2026 00:00:00 +0000
+ -- Adrien Delle Cave <pypi@doowan.net>  Thu, 05 Nov 2026 00:00:00 +0000
 
 python-httpdis (0.6.36) unstable; urgency=medium
 
@@ -37,7 +37,7 @@ python-httpdis (0.6.36) unstable; urgency=medium
   * Apply the origin policy to the actual response and preserve authentication.
   * Document frontend migration and validate cross-origin writes in Chrome.
 
- -- Codex <codex@openai.com>  Thu, 05 Nov 2026 00:00:00 +0000
+ -- Adrien Delle Cave <pypi@doowan.net>  Thu, 05 Nov 2026 00:00:00 +0000
 
 python-httpdis (0.6.35) unstable; urgency=medium
 
@@ -45,7 +45,7 @@ python-httpdis (0.6.35) unstable; urgency=medium
   * Parse repeated query indices in linear time and bound field count and depth.
   * Add the monotonic clock backport dependency on Python 2.7.
 
- -- Codex <codex@openai.com>  Thu, 05 Nov 2026 00:00:00 +0000
+ -- Adrien Delle Cave <pypi@doowan.net>  Thu, 05 Nov 2026 00:00:00 +0000
 
 python-httpdis (0.6.34) unstable; urgency=medium
 
@@ -54,7 +54,7 @@ python-httpdis (0.6.34) unstable; urgency=medium
   * Return correct HEAD Content-Length without writing a response body.
   * Remove obsolete RFC6266 dependencies and cover audit regressions.
 
- -- Codex <codex@openai.com>  Tue, 06 Oct 2026 12:00:00 +0000
+ -- Adrien Delle Cave <pypi@doowan.net>  Tue, 06 Oct 2026 12:00:00 +0000
 
 python-httpdis (0.6.33) unstable; urgency=medium
 
@@ -79,7 +79,7 @@ python-httpdis (0.6.31) unstable; urgency=medium
   * Enforce same-origin JSON mutations, CSRF, cookie isolation and session rotation.
   * Preserve token-only and legacy Basic providers without implicit browser exposure.
 
- -- Codex <codex@openai.com>  Tue, 29 Sep 2026 12:00:00 +0200
+ -- Adrien Delle Cave <pypi@doowan.net>  Tue, 29 Sep 2026 12:00:00 +0200
 
 python-httpdis (0.6.30) unstable; urgency=medium
 
@@ -88,7 +88,7 @@ python-httpdis (0.6.30) unstable; urgency=medium
   * Persist authentication through SQLite and strict Sonicprobe AnySQL transactions.
   * Keep legacy Basic authentication and caller-owned storage configuration.
 
- -- Codex <codex@openai.com>  Tue, 29 Sep 2026 10:25:00 +0200
+ -- Adrien Delle Cave <pypi@doowan.net>  Tue, 29 Sep 2026 10:25:00 +0200
 
 python-httpdis (0.6.29) unstable; urgency=medium
 
@@ -97,7 +97,7 @@ python-httpdis (0.6.29) unstable; urgency=medium
   * Bind handler subclasses per server and centralize default options.
   * Make context shutdown idempotent and clean transport resources after failures.
 
- -- Codex <codex@openai.com>  Mon, 28 Sep 2026 01:40:00 +0200
+ -- Adrien Delle Cave <pypi@doowan.net>  Mon, 28 Sep 2026 01:40:00 +0200
 
 python-httpdis (0.6.26) unstable; urgency=medium
 
