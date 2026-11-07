@@ -55,7 +55,7 @@ class ContextTests(unittest.TestCase):
             stream.write(user + ':{SHA}' + digest + '\n')
         return path
 
-    def start(self, label, user, limit, handler=j.HttpReqHandler):
+    def start(self, label, user, limit, handler=j.HttpReqHandler, **listen_options):
         context = j.HttpServerContext()
         ready = threading.Event()
         hooks = []
@@ -70,11 +70,13 @@ class ContextTests(unittest.TestCase):
         context.register(lambda request: label, 'GET', name=label)
         context.register(lambda request: [label, request.query_params()['id']], 'GET', name=CONTEXT_ROUTE)
         context.register(lambda request: request.payload_params(), 'POST', name='echo')
-        context.init({'listen_addr': '127.0.0.1', 'listen_port': 0,
-                      'auth_basic_file': self.credentials(user), 'auth_basic': label,
-                      'auth_basic_allow_legacy_hashes': True,
-                      'server_version': label, 'sys_version': '', 'max_body_size': limit,
-                      'max_workers': 2})
+        options = {'listen_addr': '127.0.0.1', 'listen_port': 0,
+                   'auth_basic_file': self.credentials(user), 'auth_basic': label,
+                   'auth_basic_allow_legacy_hashes': True,
+                   'server_version': label, 'sys_version': '', 'max_body_size': limit,
+                   'max_workers': 2}
+        options.update(listen_options)
+        context.init(options)
         def run():
             try:
                 context.run(http_req_handler=handler)
@@ -88,6 +90,20 @@ class ContextTests(unittest.TestCase):
         self.assertTrue(ready.wait(3))
         self.assertEqual(self.errors, [])
         return context, thread, hooks
+
+    def test_backlog_is_per_listener_at_activation(self):
+        seen = []
+        activate = h.ListeningHTTPServer.server_activate
+
+        def record(server):
+            seen.append(server.request_queue_size)
+            activate(server)
+
+        with mock.patch.object(h.ListeningHTTPServer, 'server_activate', record):
+            first, _, _ = self.start('first', 'alice', 1024)
+            self.start('second', 'bob', 1024, listen_backlog=256)
+        self.assertEqual(seen, [128, 256])
+        self.assertEqual(first.server.request_queue_size, 128)
 
     def request(self, context, path, user=None, method='GET', body=None):
         connection = http_client.HTTPConnection('127.0.0.1', context.server.server_port, timeout=3)

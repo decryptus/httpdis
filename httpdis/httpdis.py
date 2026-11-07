@@ -121,6 +121,15 @@ DEFAULT_OPTIONS  = get_default_options()
 _SERVER_VERSION_OPTIONS = ('server_version', 'sys_version')
 
 
+class ListeningHTTPServer(KillableThreadingHTTPServer):
+    """Apply the per-server TCP backlog before Sonicprobe opens the listener."""
+    def __init__(self, config, server_address, RequestHandlerClass,
+                 bind_and_activate=True, name=None):
+        self.request_queue_size = config.get('listen_backlog', DEFAULT_OPTIONS['listen_backlog'])
+        KillableThreadingHTTPServer.__init__(
+            self, config, server_address, RequestHandlerClass, bind_and_activate, name)
+
+
 class Command(object): # pylint: disable=too-few-public-methods,useless-object-inheritance
     """
     Each registration results in an instance of this class being created.
@@ -1439,6 +1448,11 @@ class HttpServerContext(object):
                     else:
                         self.options[optname] = optvalue
 
+            backlog = self.options['listen_backlog']
+            if (isinstance(backlog, bool) or not isinstance(backlog, integer_types)
+                    or not 0 <= backlog <= 2147483647):
+                raise ValueError('listen_backlog must be an integer between 0 and 2147483647')
+
             provider = self.options['auth_provider']
             challenge = getattr(provider, 'challenge', None)
             if provider is not None:
@@ -1524,7 +1538,7 @@ class HttpServerContext(object):
             first_error = None
 
     def run(self, options=None, http_req_handler=HttpReqHandler,
-            http_server_class=KillableThreadingHTTPServer):
+            http_server_class=ListeningHTTPServer):
         server = None
         with self._lifecycle_lock:
             if self._running:
@@ -1633,7 +1647,7 @@ def stop():
 
 
 def run(options, http_req_handler=HttpReqHandler,
-        http_server_class=KillableThreadingHTTPServer):
+        http_server_class=ListeningHTTPServer):
     return _DEFAULT_CONTEXT.run(options, http_req_handler, http_server_class)
 
 

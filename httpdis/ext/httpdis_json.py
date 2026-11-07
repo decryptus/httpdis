@@ -75,10 +75,10 @@ class HttpServerContext(httpdis.HttpServerContext):
         return httpdis.HttpServerContext.bind_handler(self, handler)
 
     def run(self, options=None, http_req_handler=HttpReqHandler,
-            http_server_class=KillableThreadingHTTPServer):
+            http_server_class=httpdis.ListeningHTTPServer):
         return httpdis.HttpServerContext.run(self, options, http_req_handler, http_server_class)
 
 
-def run(options, http_req_handler = HttpReqHandler, http_server_class = KillableThreadingHTTPServer):
+def run(options, http_req_handler = HttpReqHandler, http_server_class = httpdis.ListeningHTTPServer):
     return httpdis.run(options, http_req_handler, http_server_class)
 
