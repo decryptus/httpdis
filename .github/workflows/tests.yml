@@ -65,7 +65,7 @@ jobs:
           persist-credentials: false
       - name: Install candidate HTTPdis with pinned consumer sources
         run: |
-          python -m pip install . ./consumers/dwho "sonicprobe==0.3.53" mock packaging jmespath prometheus-client
+          python -m pip install . ./consumers/dwho "sonicprobe==0.3.66" mock packaging jmespath prometheus-client
           AUTON_PACKAGE=autond python -m pip install ./consumers/auton
           AUTON_PACKAGE=auton python -m pip install ./consumers/auton
           python -m pip install --no-deps ./consumers/covenant
@@ -105,7 +105,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install '.[auth]' "sonicprobe==0.3.55" "dwho==0.3.61" mock
+      - run: python -m pip install '.[auth]' "sonicprobe==0.3.66" "dwho==0.3.61" mock
       - name: Test the installed package outside the checkout
         env:
           HTTPDIS_REQUIRE_ARGON2: '1'

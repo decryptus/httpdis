@@ -31,7 +31,7 @@ setup(
     packages                      = find_packages(),
     install_requires              = requirements,
     extras_require                = {'auth': ['argon2-cffi>=23.1,<26; python_version >= "3.10"',
-                                                     'sonicprobe>=0.3.55']},
+                                                     'sonicprobe>=0.3.66']},
     python_requires               = ', '.join(setup_cfg['python_requires']),
     classifiers                   = setup_cfg['classifiers'],
     long_description              = long_desc,
