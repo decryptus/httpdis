@@ -8,18 +8,18 @@ permissions:
   contents: read
 concurrency:
   group: pypi-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   documentation:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - run: python -m pip install -r docs/requirements.txt
       - run: python -m sphinx -W -b html docs docs/_build/html
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: html-documentation
           path: docs/_build/html/
@@ -31,10 +31,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - run: python -m pip install build twine PyYAML
@@ -52,7 +52,7 @@ jobs:
           python -m pip install --force-reinstall --no-deps "$GITHUB_WORKSPACE"/dist/*.tar.gz
           python "$GITHUB_WORKSPACE/.github/scripts/check-test-collection.py" --runner unittest "$GITHUB_WORKSPACE/tests"
           python -m unittest discover -s "$GITHUB_WORKSPACE/tests" -v
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: python-distributions
           path: dist/
@@ -66,7 +66,7 @@ jobs:
     outputs:
       publish: ${{ steps.release.outputs.publish }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -86,7 +86,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: python-distributions
           path: dist/
