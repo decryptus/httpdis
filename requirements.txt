@@ -1,6 +1,6 @@
 python-magic
 sonicprobe>=0.3.66
-six>=1.13.0
+six>=1.17.0
 legacy-cgi; python_version >= '3.13'
 legacycrypt; python_version >= '3.13'
 monotonic; python_version < "3"
